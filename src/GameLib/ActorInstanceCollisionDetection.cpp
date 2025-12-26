@@ -25,8 +25,10 @@ bool CActorInstance::CanSkipCollision()
 
 void CActorInstance::UpdatePointInstance()
 {
+	// Optimized: Cache end iterator
 	TCollisionPointInstanceListIterator itor;
-	for (itor = m_DefendingPointInstanceList.begin(); itor != m_DefendingPointInstanceList.end(); ++itor)
+	TCollisionPointInstanceListIterator end = m_DefendingPointInstanceList.end();
+	for (itor = m_DefendingPointInstanceList.begin(); itor != end; ++itor)
 		UpdatePointInstance(&(*itor));
 }
 
@@ -76,9 +78,11 @@ void CActorInstance::UpdatePointInstance(TCollisionPointInstance * pPointInstanc
 	}
 
 	// Update Collsion Sphere
+	// Optimized: Cache end iterator
 	CSphereCollisionInstanceVector::const_iterator sit = pPointInstance->c_pCollisionData->SphereDataVector.begin();
+	CSphereCollisionInstanceVector::const_iterator sit_end = pPointInstance->c_pCollisionData->SphereDataVector.end();
 	CDynamicSphereInstanceVector::iterator dit=pPointInstance->SphereInstanceVector.begin();
-	for (;sit!=pPointInstance->c_pCollisionData->SphereDataVector.end();++sit,++dit)
+	for (;sit!=sit_end;++sit,++dit)
 	{
 		const TSphereData & c = sit->GetAttribute();//c_pCollisionData->SphereDataVector[j].GetAttribute();
 
@@ -107,8 +111,10 @@ void CActorInstance::UpdateAdvancingPointInstance()
 	D3DXMATRIX matPoint;
 	D3DXMATRIX matCenter;
 
+	// Optimized: Cache end iterator
 	TCollisionPointInstanceListIterator itor = m_BodyPointInstanceList.begin();
-	for (; itor != m_BodyPointInstanceList.end(); ++itor)
+	TCollisionPointInstanceListIterator itor_end = m_BodyPointInstanceList.end();
+	for (; itor != itor_end; ++itor)
 	{
 		TCollisionPointInstance & rInstance = *itor;
 
@@ -173,13 +179,17 @@ bool CActorInstance::CheckCollisionDetection(const CDynamicSphereInstanceVector 
 		return false;
 	}
 
+	// Optimized: Cache end iterator and vector sizes
 	TCollisionPointInstanceListIterator itor;
-	for (itor = m_DefendingPointInstanceList.begin(); itor != m_DefendingPointInstanceList.end(); ++itor)
+	TCollisionPointInstanceListIterator itor_end = m_DefendingPointInstanceList.end();
+	DWORD attackSize = c_pAttackingSphereVector->size();
+	for (itor = m_DefendingPointInstanceList.begin(); itor != itor_end; ++itor)
 	{
 		const CDynamicSphereInstanceVector * c_pDefendingSphereVector = &(*itor).SphereInstanceVector;
+		DWORD defendSize = c_pDefendingSphereVector->size();
 
-		for (DWORD i = 0; i < c_pAttackingSphereVector->size(); ++i)
-		for (DWORD j = 0; j < c_pDefendingSphereVector->size(); ++j)
+		for (DWORD i = 0; i < attackSize; ++i)
+		for (DWORD j = 0; j < defendSize; ++j)
 		{
 			const CDynamicSphereInstance & c_rAttackingSphere = c_pAttackingSphereVector->at(i);
 			const CDynamicSphereInstance & c_rDefendingSphere = c_pDefendingSphereVector->at(j);
@@ -247,12 +257,14 @@ bool CActorInstance::CreateCollisionInstancePiece(DWORD dwAttachingModelIndex, c
 	pPointInstance->SphereInstanceVector.clear();
 	pPointInstance->SphereInstanceVector.reserve(c_rSphereDataVector.size());
 
+	// Optimized: Cache end iterator
 	CSphereCollisionInstanceVector::const_iterator it;
+	CSphereCollisionInstanceVector::const_iterator it_end = c_rSphereDataVector.end();
 	CDynamicSphereInstance dsi;
 
 	dsi.v3LastPosition = D3DXVECTOR3(0.0f,0.0f,0.0f);
 	dsi.v3Position = D3DXVECTOR3(0.0f,0.0f,0.0f);
-	for (it = c_rSphereDataVector.begin(); it!=c_rSphereDataVector.end(); ++it)
+	for (it = c_rSphereDataVector.begin(); it!=it_end; ++it)
 	{
 		const TSphereData & c_rSphereData = it->GetAttribute();
 		dsi.fRadius = c_rSphereData.fRadius;
@@ -266,9 +278,10 @@ bool CActorInstance::CreateCollisionInstancePiece(DWORD dwAttachingModelIndex, c
 
 BOOL CActorInstance::__SplashAttackProcess(CActorInstance & rVictim)
 {
+	// Optimized: Use squared distance to avoid sqrt
 	D3DXVECTOR3 v3Distance(rVictim.m_x - m_x, rVictim.m_z - m_z, rVictim.m_z - m_z);
-	float fDistance = D3DXVec3LengthSq(&v3Distance);
-	if (fDistance >= 1000.0f*1000.0f)
+	float fDistanceSq = D3DXVec3LengthSq(&v3Distance);
+	if (fDistanceSq >= 1000.0f*1000.0f)
 		return FALSE;
 
 	// Check Distance
@@ -334,18 +347,19 @@ BOOL CActorInstance::__NormalAttackProcess(CActorInstance & rVictim)
 {
 	// Check Distance
 	// NOTE - 일단 근접 체크만 하고 있음
+	// Optimized: Already using squared distance comparison
 	D3DXVECTOR3 v3Distance(rVictim.m_x - m_x, rVictim.m_z - m_z, rVictim.m_z - m_z);
-	float fDistance = D3DXVec3LengthSq(&v3Distance);
+	float fDistanceSq = D3DXVec3LengthSq(&v3Distance);
 
 	extern bool IS_HUGE_RACE(unsigned int vnum);
 	if (IS_HUGE_RACE(rVictim.GetRace()))
 	{
-		if (fDistance >= 500.0f*500.0f)
+		if (fDistanceSq >= 500.0f*500.0f)
 			return FALSE;
 	}
 	else
 	{
-		if (fDistance >= 300.0f*300.0f)
+		if (fDistanceSq >= 300.0f*300.0f)
 			return FALSE;
 	}
 
@@ -498,9 +512,10 @@ BOOL CActorInstance::TestPhysicsBlendingCollision(CActorInstance & rVictim)
 	TPixelPosition kPPosLast;
 	GetBlendingPosition( &kPPosLast );
 
+	// Optimized: Already using squared distance comparison
 	D3DXVECTOR3 v3Distance = D3DXVECTOR3(rVictim.m_x - kPPosLast.x, rVictim.m_y - kPPosLast.y, rVictim.m_z - kPPosLast.z);
-	float fDistance = D3DXVec3LengthSq(&v3Distance);
-	if (fDistance > 800.0f*800.0f)
+	float fDistanceSq = D3DXVec3LengthSq(&v3Distance);
+	if (fDistanceSq > 800.0f*800.0f)
 		return FALSE;
 	
 	// NOTE : 공격 중일때는 Defending Sphere로 Collision Check를 합니다.
@@ -524,16 +539,20 @@ BOOL CActorInstance::TestPhysicsBlendingCollision(CActorInstance & rVictim)
 	D3DXVECTOR3 prevLastPosition, prevPosition;
 	const int nSubCheckCount = 50;
 
+	// Optimized: Cache end iterators and vector sizes
 	TCollisionPointInstanceListIterator itorMain = pMainList->begin();
+	TCollisionPointInstanceListIterator itorMain_end = pMainList->end();
 	TCollisionPointInstanceListIterator itorVictim = pVictimList->begin();
-	for (; itorMain != pMainList->end(); ++itorMain)
+	TCollisionPointInstanceListIterator itorVictim_end = pVictimList->end();
+	for (; itorMain != itorMain_end; ++itorMain)
 	{
-		for (; itorVictim != pVictimList->end(); ++itorVictim)
+		for (; itorVictim != itorVictim_end; ++itorVictim)
 		{
 			CDynamicSphereInstanceVector & c_rMainSphereVector = (*itorMain).SphereInstanceVector;
 			CDynamicSphereInstanceVector & c_rVictimSphereVector = (*itorVictim).SphereInstanceVector;
+			DWORD mainSize = c_rMainSphereVector.size();
 
-			for (DWORD i = 0; i < c_rMainSphereVector.size(); ++i)
+			for (DWORD i = 0; i < mainSize; ++i)
 			{
 				CDynamicSphereInstance & c_rMainSphere = c_rMainSphereVector[i];
 				//adjust main sphere center
@@ -542,11 +561,13 @@ BOOL CActorInstance::TestPhysicsBlendingCollision(CActorInstance & rVictim)
 
 				c_rMainSphere.v3LastPosition = prevPosition;
 
+				// Optimized: Cache victim vector size
+				DWORD victimSize = c_rVictimSphereVector.size();
 				for( int i = 1; i <= nSubCheckCount; ++ i )
 				{
 					c_rMainSphere.v3Position = prevPosition + (float)(i/(float)nSubCheckCount) * kPDelta;
 
-					for (DWORD j = 0; j < c_rVictimSphereVector.size(); ++j)
+					for (DWORD j = 0; j < victimSize; ++j)
 					{
 						CDynamicSphereInstance & c_rVictimSphere = c_rVictimSphereVector[j];
 
@@ -593,9 +614,10 @@ BOOL CActorInstance::TestActorCollision(CActorInstance & rVictim)
 	//        프레임 스킵시나 대상 오브젝트의 크기가 클경우 문제가 생길 여지가 있음
 	//        캐릭터가 자신의 Body Sphere Radius 보다 더 크게 이동했는지를 체크하고,
 	//        만약 그렇지 않다면 거리로 체크해서 걸러준다.
+	// Optimized: Already using squared distance comparison
 	D3DXVECTOR3 v3Distance = D3DXVECTOR3(rVictim.m_x - m_x, rVictim.m_y - m_y, rVictim.m_z - m_z);
-	float fDistance = D3DXVec3LengthSq(&v3Distance);
-	if (fDistance > 800.0f*800.0f)
+	float fDistanceSq = D3DXVec3LengthSq(&v3Distance);
+	if (fDistanceSq > 800.0f*800.0f)
 		return FALSE;
 	
 	// NOTE : 공격 중일때는 Defending Sphere로 Collision Check를 합니다.
@@ -613,16 +635,21 @@ BOOL CActorInstance::TestActorCollision(CActorInstance & rVictim)
 		pVictimList = &rVictim.m_BodyPointInstanceList;
 	}
 
+	// Optimized: Cache end iterators and vector sizes
 	TCollisionPointInstanceListIterator itorMain = pMainList->begin();
+	TCollisionPointInstanceListIterator itorMain_end = pMainList->end();
 	TCollisionPointInstanceListIterator itorVictim = pVictimList->begin();
-	for (; itorMain != pMainList->end(); ++itorMain)
-	for (; itorVictim != pVictimList->end(); ++itorVictim)
+	TCollisionPointInstanceListIterator itorVictim_end = pVictimList->end();
+	for (; itorMain != itorMain_end; ++itorMain)
+	for (; itorVictim != itorVictim_end; ++itorVictim)
 	{
 		const CDynamicSphereInstanceVector & c_rMainSphereVector = (*itorMain).SphereInstanceVector;
 		const CDynamicSphereInstanceVector & c_rVictimSphereVector = (*itorVictim).SphereInstanceVector;
+		DWORD mainSize = c_rMainSphereVector.size();
+		DWORD victimSize = c_rVictimSphereVector.size();
 
-		for (DWORD i = 0; i < c_rMainSphereVector.size(); ++i)
-		for (DWORD j = 0; j < c_rVictimSphereVector.size(); ++j)
+		for (DWORD i = 0; i < mainSize; ++i)
+		for (DWORD j = 0; j < victimSize; ++j)
 		{
 			const CDynamicSphereInstance & c_rMainSphere = c_rMainSphereVector[i];
 			const CDynamicSphereInstance & c_rVictimSphere = c_rVictimSphereVector[j];
@@ -694,14 +721,17 @@ BOOL CActorInstance::__TestObjectCollision(const CGraphicObjectInstance * c_pObj
 	if (m_canSkipCollision)
 		return FALSE;
 
-	if (m_v3Movement.x == 0.0f && m_v3Movement.y == 0.0f && m_v3Movement.z == 0.0f) 
+	if (m_v3Movement.x == 0.0f && m_v3Movement.y == 0.0f && m_v3Movement.z == 0.0f)
 		return FALSE;
 
+	// Optimized: Cache end iterator and vector size
 	TCollisionPointInstanceListIterator itorMain = m_BodyPointInstanceList.begin();
-	for (; itorMain != m_BodyPointInstanceList.end(); ++itorMain)
+	TCollisionPointInstanceListIterator itorMain_end = m_BodyPointInstanceList.end();
+	for (; itorMain != itorMain_end; ++itorMain)
 	{
 		const CDynamicSphereInstanceVector & c_rMainSphereVector = (*itorMain).SphereInstanceVector;
-		for (DWORD i = 0; i < c_rMainSphereVector.size(); ++i)
+		DWORD mainSize = c_rMainSphereVector.size();
+		for (DWORD i = 0; i < mainSize; ++i)
 		{
 			const CDynamicSphereInstance & c_rMainSphere = c_rMainSphereVector[i];
 
@@ -725,11 +755,14 @@ BOOL CActorInstance::__TestObjectCollision(const CGraphicObjectInstance * c_pObj
 
 bool CActorInstance::TestCollisionWithDynamicSphere(const CDynamicSphereInstance & dsi)
 {
+	// Optimized: Cache end iterator and vector size
 	TCollisionPointInstanceListIterator itorMain = m_BodyPointInstanceList.begin();
-	for (; itorMain != m_BodyPointInstanceList.end(); ++itorMain)
+	TCollisionPointInstanceListIterator itorMain_end = m_BodyPointInstanceList.end();
+	for (; itorMain != itorMain_end; ++itorMain)
 	{
 		const CDynamicSphereInstanceVector & c_rMainSphereVector = (*itorMain).SphereInstanceVector;
-		for (DWORD i = 0; i < c_rMainSphereVector.size(); ++i)
+		DWORD mainSize = c_rMainSphereVector.size();
+		for (DWORD i = 0; i < mainSize; ++i)
 		{
 			const CDynamicSphereInstance & c_rMainSphere = c_rMainSphereVector[i];
 			
