@@ -1143,9 +1143,37 @@ bool CPythonNetworkStream::SendCharacterStatePacket(const TPixelPosition& c_rkPP
 bool CPythonNetworkStream::SendUseSkillPacket(DWORD dwSkillIndex, DWORD dwTargetVID)
 {
 	TPacketCGUseSkill UseSkillPacket;
+
 	UseSkillPacket.bHeader = HEADER_CG_USE_SKILL;
 	UseSkillPacket.dwVnum = dwSkillIndex;
 	UseSkillPacket.dwTargetVID = dwTargetVID;
+
+	// tw1x1 fix wrong fly targeting for viewing clients
+	if (dwTargetVID)
+	{
+		CPythonCharacterManager& rpcm = CPythonCharacterManager::Instance();
+		CInstanceBase* pTarget = rpcm.GetInstancePtr(dwTargetVID);
+
+		if (pTarget)
+		{
+			TPixelPosition kPos;
+
+			pTarget->NEW_GetPixelPosition(&kPos);
+			SendFlyTargetingPacket(dwTargetVID, kPos);
+		}
+		else
+		{
+			TPixelPosition kPos;
+
+			kPos.x = 0;
+			kPos.y = 0;
+			kPos.z = 0;
+
+			SendFlyTargetingPacket(0, kPos);
+		}
+	}
+	// END OF tw1x1 fix wrong fly targeting for viewing clients
+
 	if (!Send(sizeof(TPacketCGUseSkill), &UseSkillPacket))
 	{
 		Tracen("CPythonNetworkStream::SendUseSkillPacket - SEND PACKET ERROR");

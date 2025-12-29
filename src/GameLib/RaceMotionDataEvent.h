@@ -147,9 +147,9 @@ namespace NMotionEvent
 				isFishingEffect = FALSE;
 			}
 			dwEffectIndex = GetCaseCRC32(strEffectFileName.c_str(), strEffectFileName.length());
-#ifndef _DEBUG
+// #ifndef _DEBUG
 			CEffectManager::Instance().RegisterEffect(strEffectFileName.c_str());
-#endif
+// #endif
 
 			return true;
 		}
@@ -188,10 +188,10 @@ namespace NMotionEvent
 				return false;
 			dwFlyIndex = GetCaseCRC32(strFlyFileName.c_str(), strFlyFileName.length());
 
-#ifndef _DEBUG
+// #ifndef _DEBUG
 			// Register Fly
 			CFlyingManager::Instance().RegisterFlyingData(strFlyFileName.c_str());
-#endif
+// #endif
 
 			return true;
 		}
