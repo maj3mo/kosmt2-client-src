@@ -13,4 +13,6 @@ This repository contains the source code necessary to compile the game client ex
 ## 📋 Changelog
 
 ### 🐛 Bug Fixes
-* **PK Mode:** Resolved conflict for Hostile mode when both players have negative alignment, added PK_PROTECT mode safeguards.
+* **Invisibility:** Resolved an issue where effects were not visible after becoming visible again, if they were added in AFFECT_INVISIBILITY state.
+* **Invisibility:** Resolved an issue where projectile fly effects were visible on targets within AFFECT_INVISIBILITY state.
+* **Effects on low opacity meshes**: Resolved a conflict between effects on meshes with opacity < 1 and invisibility fixes.
