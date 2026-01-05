@@ -71,14 +71,7 @@ void CResourceManager::ProcessBackgroundLoading()
 
 		//printf("REQ %s\n", stFileName.c_str());
 
-			if (m_pLoaderThreadPool)
-		{
-			m_pLoaderThreadPool->Request(stFileName);
-		}
-		else
-		{
-			ms_loadingThread.Request(stFileName);
-		}
+		ms_loadingThread.Request(stFileName);
 
 		m_WaitingMap.insert(TResourceRequestMap::value_type(dwFileCRC, stFileName));
 		itor = m_RequestMap.erase(itor);
@@ -87,44 +80,7 @@ void CResourceManager::ProcessBackgroundLoading()
 
 	DWORD dwCurrentTime = ELTimer_GetMSec();
 
-	if (m_pLoaderThreadPool)
-	{
-		CFileLoaderThreadPool::TLoadResult result;
-		while (m_pLoaderThreadPool->Fetch(result))
-		{
-			CResource * pResource = GetResourcePointer(result.stFileName.c_str());
-
-			if (pResource)
-			{
-				if (pResource->IsEmpty())
-				{
-						if (result.hasDecodedImage)
-					{
-						CGraphicImage* pImage = dynamic_cast<CGraphicImage*>(pResource);
-						if (pImage)
-						{
-							pImage->OnLoadFromDecodedData(result.decodedImage);
-						}
-						else
-						{
-									pResource->OnLoad(result.File.size(), result.File.data());
-						}
-					}
-					else
-					{
-							pResource->OnLoad(result.File.size(), result.File.data());
-					}
-
-					pResource->AddReferenceOnly();
-					m_pResRefDecreaseWaitingMap.insert(TResourceRefDecreaseWaitingMap::value_type(dwCurrentTime, pResource));
-				}
-			}
-
-			m_WaitingMap.erase(GetCRC32(result.stFileName.c_str(), result.stFileName.size()));
-		}
-	}
-
-	// Process old thread results
+	// Process thread results
 	CFileLoaderThread::TData * pData;
 	while (ms_loadingThread.Fetch(&pData))
 	{
@@ -580,19 +536,9 @@ void CResourceManager::ReserveDeletingResource(CResource * pResource)
 }
 
 CResourceManager::CResourceManager()
-	: m_pLoaderThreadPool(nullptr)
-	, m_pTextureCache(nullptr)
+	: m_pTextureCache(nullptr)
 {
 	ms_loadingThread.Create(0);
-
-	m_pLoaderThreadPool = new CFileLoaderThreadPool();
-	if (!m_pLoaderThreadPool->Initialize())
-	{
-		TraceError("CResourceManager: Failed to initialize FileLoaderThreadPool");
-		delete m_pLoaderThreadPool;
-		m_pLoaderThreadPool = nullptr;
-	}
-
 	m_pTextureCache = new CTextureCache(512);
 }
 
@@ -600,12 +546,6 @@ CResourceManager::~CResourceManager()
 {
 	Destroy();
 	ms_loadingThread.Shutdown();
-
-	if (m_pLoaderThreadPool)
-	{
-		delete m_pLoaderThreadPool;
-		m_pLoaderThreadPool = nullptr;
-	}
 
 	if (m_pTextureCache)
 	{

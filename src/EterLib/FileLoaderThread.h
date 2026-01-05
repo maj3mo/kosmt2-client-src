@@ -2,11 +2,10 @@
 #define __INC_YMIR_ETERLIB_FILELOADERTHREAD_H__
 
 #include <deque>
-#include "Thread.h"
-#include "Mutex.h"
+#include <mutex>
 #include "PackLib/PackManager.h"
 
-class CFileLoaderThread 
+class CFileLoaderThread
 {
 	public:
 		typedef struct SData
@@ -19,41 +18,19 @@ class CFileLoaderThread
 		CFileLoaderThread();
 		~CFileLoaderThread();
 
-		int Create(void * arg);
-	
+		bool Create(void * arg);
+		void Shutdown();
+
 	public:
-		void	Request(std::string & c_rstFileName);
+		void	Request(const std::string& c_rstFileName);
 		bool	Fetch(TData ** ppData);
-		void	Shutdown();
-
-	protected:
-		static UINT CALLBACK	EntryPoint(void * pThis);
-		UINT					Run(void * arg);
-
-		void *					Arg() const		{ return m_pArg; }
-		void					Arg(void * arg) { m_pArg = arg; }
-		
-		HANDLE					m_hThread;
 
 	private:
-		void *					m_pArg;
-		unsigned				m_uThreadID;
-
-	protected:
-		UINT					Setup();
-		UINT					Execute(void * pvArg);
-		void					Destroy();
-		void					Process();
+		void	ProcessFile(const std::string& fileName);
 
 	private:
-		std::deque<TData *>		m_pRequestDeque;
-		Mutex					m_RequestMutex;
-
-		std::deque<TData *>		m_pCompleteDeque;
-		Mutex					m_CompleteMutex;
-
-		HANDLE					m_hSemaphore;
-		int						m_iRestSemCount;
+		std::deque<TData*>		m_pCompleteDeque;
+		std::mutex				m_CompleteMutex;
 		bool					m_bShutdowned;
 };
 
