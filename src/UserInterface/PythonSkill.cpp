@@ -1279,11 +1279,60 @@ float CPythonSkill::SSkillData::ProcessFormula(CPoly * pPoly, float fSkillLevel,
 	return pPoly->Eval();
 }
 
-static void ReplaceFirst(std::string& s, const char* needle, const std::string& repl)
+// Format specifiers supported in skill descriptions
+static const char* FORMAT_SPECIFIERS[] = {
+	"%.0f",  // Integer (no decimals)
+	"%.1f",  // 1 decimal place
+	"%.2f",  // 2 decimal places
+	"%d",    // Integer (alternative)
+};
+static const size_t FORMAT_SPECIFIER_COUNT = sizeof(FORMAT_SPECIFIERS) / sizeof(FORMAT_SPECIFIERS[0]);
+
+// Find and replace the first occurrence of any format specifier with the given value
+// Returns true if a replacement was made
+static bool ReplaceNextFormatSpecifier(std::string& s, float value)
 {
-	size_t pos = s.find(needle);
-	if (pos != std::string::npos)
-		s.replace(pos, strlen(needle), repl);
+	size_t bestPos = std::string::npos;
+	size_t bestLen = 0;
+	const char* bestSpec = nullptr;
+
+	// Find the first (leftmost) format specifier in the string
+	for (size_t i = 0; i < FORMAT_SPECIFIER_COUNT; ++i)
+	{
+		size_t pos = s.find(FORMAT_SPECIFIERS[i]);
+		if (pos != std::string::npos && (bestPos == std::string::npos || pos < bestPos))
+		{
+			bestPos = pos;
+			bestLen = strlen(FORMAT_SPECIFIERS[i]);
+			bestSpec = FORMAT_SPECIFIERS[i];
+		}
+	}
+
+	if (bestPos == std::string::npos)
+		return false;
+
+	// Format the value according to the specifier found
+	char szValue[64];
+	if (strcmp(bestSpec, "%.0f") == 0 || strcmp(bestSpec, "%d") == 0)
+		_snprintf(szValue, sizeof(szValue), "%.0f", floorf(value));
+	else if (strcmp(bestSpec, "%.1f") == 0)
+		_snprintf(szValue, sizeof(szValue), "%.1f", value);
+	else // %.2f or other
+		_snprintf(szValue, sizeof(szValue), "%.2f", value);
+
+	s.replace(bestPos, bestLen, szValue);
+	return true;
+}
+
+// Replace all occurrences of "%%" with "%" (escaped percent sign)
+static void UnescapePercent(std::string& s)
+{
+	size_t pos = 0;
+	while ((pos = s.find("%%", pos)) != std::string::npos)
+	{
+		s.replace(pos, 2, "%");
+		++pos; // Move past the replaced '%'
+	}
 }
 
 const char* CPythonSkill::SSkillData::GetAffectDescription(DWORD dwIndex, float fSkillLevel)
@@ -1303,33 +1352,20 @@ const char* CPythonSkill::SSkillData::GetAffectDescription(DWORD dwIndex, float 
 	float fMinValue = ProcessFormula(&minPoly, fSkillLevel);
 	float fMaxValue = ProcessFormula(&maxPoly, fSkillLevel);
 
+	// Take absolute values
 	if (fMinValue < 0.0f) fMinValue = -fMinValue;
 	if (fMaxValue < 0.0f) fMaxValue = -fMaxValue;
-
-	const bool wantsInt = (desc.find("%.0f") != std::string::npos);
-	if (wantsInt)
-	{
-		fMinValue = floorf(fMinValue);
-		fMaxValue = floorf(fMaxValue);
-	}
-
-	char szMin[64], szMax[64];
-	if (wantsInt)
-	{
-		_snprintf(szMin, sizeof(szMin), "%.0f", fMinValue);
-		_snprintf(szMax, sizeof(szMax), "%.0f", fMaxValue);
-	}
-	else
-	{
-		_snprintf(szMin, sizeof(szMin), "%.2f", fMinValue);
-		_snprintf(szMax, sizeof(szMax), "%.2f", fMaxValue);
-	}
 
 	static std::string out;
 	out = desc;
 
-	ReplaceFirst(out, "%.0f", szMin);
-	ReplaceFirst(out, "%.0f", szMax);
+	// Replace format specifiers in order of appearance
+	// First specifier gets min value, second gets max value
+	ReplaceNextFormatSpecifier(out, fMinValue);
+	ReplaceNextFormatSpecifier(out, fMaxValue);
+
+	// Convert escaped %% to single % (for display like "30%")
+	UnescapePercent(out);
 
 	return out.c_str();
 }

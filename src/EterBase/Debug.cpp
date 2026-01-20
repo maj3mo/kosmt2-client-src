@@ -16,34 +16,93 @@ const DWORD DEBUG_STRING_MAX_LEN = 1024;
 static int isLogFile = false;
 HWND g_PopupHwnd = NULL;
 
-// Convert UTF-8 char* -> wide and send to debugger (NO helper function, just a macro)
+// ============================================================================
+// OPTIMIZED LOGGING INFRASTRUCTURE
+// ============================================================================
+
+// Cached timestamp to avoid repeated time()/localtime() syscalls
+// Refreshes every ~100ms (good enough for logging, avoids syscall overhead)
+struct TCachedTimestamp
+{
+    DWORD lastUpdateMs = 0;
+    int month = 0;
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+
+    void Update()
+    {
+        DWORD now = ELTimer_GetMSec();
+        // Refresh timestamp every 100ms (not per-call)
+        if (now - lastUpdateMs > 100)
+        {
+            time_t ct = time(0);
+            struct tm ctm = *localtime(&ct);
+            month = ctm.tm_mon + 1;
+            day = ctm.tm_mday;
+            hour = ctm.tm_hour;
+            minute = ctm.tm_min;
+            lastUpdateMs = now;
+        }
+    }
+
+    void Format(char* buf, size_t bufSize) const
+    {
+        DWORD msec = ELTimer_GetMSec() % 60000;
+        _snprintf_s(buf, bufSize, _TRUNCATE, "%02d%02d %02d:%02d:%05d :: ",
+            month, day, hour, minute, (int)msec);
+    }
+};
+
+static TCachedTimestamp g_cachedTimestamp;
+
+// Optimized debug output: Fast path for ASCII strings (avoids Utf8ToWide allocation)
 #ifdef _DEBUG
 #define DBG_OUT_W_UTF8(psz)                                                   \
     do {                                                                      \
         const char* __s = (psz) ? (psz) : "";                                 \
-        std::wstring __w = Utf8ToWide(__s);                                   \
-        OutputDebugStringW(__w.c_str());                                      \
+        size_t __len = strlen(__s);                                           \
+        if (Utf8Fast::IsAsciiOnly(__s, __len)) {                              \
+            /* ASCII fast path: direct conversion, no allocation */           \
+            wchar_t __wbuf[512];                                              \
+            size_t __wlen = (__len < 511) ? __len : 511;                      \
+            for (size_t __i = 0; __i < __wlen; ++__i)                         \
+                __wbuf[__i] = (wchar_t)(unsigned char)__s[__i];               \
+            __wbuf[__wlen] = L'\0';                                           \
+            OutputDebugStringW(__wbuf);                                       \
+        } else {                                                              \
+            /* Non-ASCII: use full conversion */                              \
+            std::wstring __w = Utf8ToWide(__s);                               \
+            OutputDebugStringW(__w.c_str());                                  \
+        }                                                                     \
     } while (0)
 #else
 #define DBG_OUT_W_UTF8(psz) do { (void)(psz); } while (0)
 #endif
 
+// Buffered log file writer
+// OPTIMIZATION: Buffered writes with periodic flush instead of per-write fflush()
+// - Collects writes in memory buffer
+// - Flushes when buffer is full OR every 500ms OR on shutdown
+// - Reduces disk I/O from 1000s of syncs to ~2 per second
 class CLogFile : public CSingleton<CLogFile>
 {
     public:
-        CLogFile() : m_fp(NULL) {}
+        CLogFile() : m_fp(NULL), m_bufferPos(0), m_lastFlushMs(0) {}
 
         virtual ~CLogFile()
         {
+            Flush(); // Ensure all buffered data is written
             if (m_fp)
                 fclose(m_fp);
-
             m_fp = NULL;
         }
 
         void Initialize()
         {
             m_fp = fopen("log/log.txt", "w");
+            m_bufferPos = 0;
+            m_lastFlushMs = ELTimer_GetMSec();
         }
 
         void Write(const char* c_pszMsg)
@@ -51,22 +110,63 @@ class CLogFile : public CSingleton<CLogFile>
             if (!m_fp)
                 return;
 
-            time_t ct = time(0);
-            struct tm ctm = *localtime(&ct);
+            // Use cached timestamp (updated every ~100ms)
+            g_cachedTimestamp.Update();
+            char timestamp[32];
+            g_cachedTimestamp.Format(timestamp, sizeof(timestamp));
 
-            fprintf(m_fp, "%02d%02d %02d:%02d:%05d :: %s",
-                ctm.tm_mon + 1,
-                ctm.tm_mday,
-                ctm.tm_hour,
-                ctm.tm_min,
-                ELTimer_GetMSec() % 60000,
-                c_pszMsg);
+            // Calculate total length needed
+            size_t timestampLen = strlen(timestamp);
+            size_t msgLen = c_pszMsg ? strlen(c_pszMsg) : 0;
+            size_t totalLen = timestampLen + msgLen;
 
+            // If this write would overflow the buffer, flush first
+            if (m_bufferPos + totalLen >= BUFFER_SIZE - 1)
+                Flush();
+
+            // If message is larger than buffer, write directly (rare case)
+            if (totalLen >= BUFFER_SIZE - 1)
+            {
+                fputs(timestamp, m_fp);
+                if (c_pszMsg)
+                    fputs(c_pszMsg, m_fp);
+                fflush(m_fp);
+                return;
+            }
+
+            // Append to buffer
+            memcpy(m_buffer + m_bufferPos, timestamp, timestampLen);
+            m_bufferPos += timestampLen;
+            if (msgLen > 0)
+            {
+                memcpy(m_buffer + m_bufferPos, c_pszMsg, msgLen);
+                m_bufferPos += msgLen;
+            }
+
+            // Periodic flush: every 500ms or when buffer is >75% full
+            DWORD now = ELTimer_GetMSec();
+            if (now - m_lastFlushMs > 500 || m_bufferPos > BUFFER_SIZE * 3 / 4)
+                Flush();
+        }
+
+        void Flush()
+        {
+            if (!m_fp || m_bufferPos == 0)
+                return;
+
+            m_buffer[m_bufferPos] = '\0';
+            fputs(m_buffer, m_fp);
             fflush(m_fp);
+            m_bufferPos = 0;
+            m_lastFlushMs = ELTimer_GetMSec();
         }
 
     protected:
+        static const size_t BUFFER_SIZE = 8192; // 8KB buffer
         FILE* m_fp;
+        char m_buffer[BUFFER_SIZE];
+        size_t m_bufferPos;
+        DWORD m_lastFlushMs;
 };
 
 static CLogFile gs_logfile;
@@ -220,9 +320,50 @@ void Tracef(const char* c_szFormat, ...)
         LogFile(szBuf);
 }
 
+// Buffered stderr writer for syserr (same pattern as CLogFile)
+// OPTIMIZATION: Reduces fflush(stderr) from every call to every 500ms
+static struct TSyserrBuffer
+{
+    static const size_t BUFFER_SIZE = 4096;
+    char buffer[BUFFER_SIZE];
+    size_t pos = 0;
+    DWORD lastFlushMs = 0;
+
+    void Write(const char* msg, size_t len)
+    {
+        if (pos + len >= BUFFER_SIZE - 1)
+            Flush();
+
+        if (len >= BUFFER_SIZE - 1)
+        {
+            // Large message: write directly
+            fwrite(msg, 1, len, stderr);
+            fflush(stderr);
+            return;
+        }
+
+        memcpy(buffer + pos, msg, len);
+        pos += len;
+
+        DWORD now = ELTimer_GetMSec();
+        if (now - lastFlushMs > 500 || pos > BUFFER_SIZE * 3 / 4)
+            Flush();
+    }
+
+    void Flush()
+    {
+        if (pos == 0)
+            return;
+        fwrite(buffer, 1, pos, stderr);
+        fflush(stderr);
+        pos = 0;
+        lastFlushMs = ELTimer_GetMSec();
+    }
+} g_syserrBuffer;
+
 void TraceError(const char* c_szFormat, ...)
 {
-//#ifndef _DISTRIBUTE 
+//#ifndef _DISTRIBUTE
     char szBuf[DEBUG_STRING_MAX_LEN + 2];
 
     strncpy_s(szBuf, sizeof(szBuf), "SYSERR: ", _TRUNCATE);
@@ -243,17 +384,14 @@ void TraceError(const char* c_szFormat, ...)
         szBuf[sizeof(szBuf) - 1] = '\0';
     }
 
-    time_t ct = time(0);
-    struct tm ctm = *localtime(&ct);
+    // OPTIMIZED: Use cached timestamp instead of time()/localtime() per call
+    g_cachedTimestamp.Update();
+    char timestamp[32];
+    g_cachedTimestamp.Format(timestamp, sizeof(timestamp));
 
-    fprintf(stderr, "%02d%02d %02d:%02d:%05d :: %s",
-        ctm.tm_mon + 1,
-        ctm.tm_mday,
-        ctm.tm_hour,
-        ctm.tm_min,
-        ELTimer_GetMSec() % 60000,
-        szBuf + 8);
-    fflush(stderr);
+    // OPTIMIZED: Write to buffered stderr instead of fprintf+fflush per call
+    g_syserrBuffer.Write(timestamp, strlen(timestamp));
+    g_syserrBuffer.Write(szBuf + 8, strlen(szBuf + 8)); // Skip "SYSERR: " prefix for stderr
 
 #ifdef _DEBUG
     DBG_OUT_W_UTF8(szBuf);
@@ -267,8 +405,7 @@ void TraceError(const char* c_szFormat, ...)
 
 void TraceErrorWithoutEnter(const char* c_szFormat, ...)
 {
-//#ifndef _DISTRIBUTE 
-
+//#ifndef _DISTRIBUTE
     char szBuf[DEBUG_STRING_MAX_LEN];
 
     va_list args;
@@ -276,17 +413,14 @@ void TraceErrorWithoutEnter(const char* c_szFormat, ...)
     _vsnprintf_s(szBuf, sizeof(szBuf), _TRUNCATE, c_szFormat, args);
     va_end(args);
 
-    time_t ct = time(0);
-    struct tm ctm = *localtime(&ct);
+    // OPTIMIZED: Use cached timestamp instead of time()/localtime() per call
+    g_cachedTimestamp.Update();
+    char timestamp[32];
+    g_cachedTimestamp.Format(timestamp, sizeof(timestamp));
 
-    fprintf(stderr, "%02d%02d %02d:%02d:%05d :: %s",
-        ctm.tm_mon + 1,
-        ctm.tm_mday,
-        ctm.tm_hour,
-        ctm.tm_min,
-        ELTimer_GetMSec() % 60000,
-        szBuf + 8);
-    fflush(stderr);
+    // OPTIMIZED: Write to buffered stderr instead of fprintf+fflush per call
+    g_syserrBuffer.Write(timestamp, strlen(timestamp));
+    g_syserrBuffer.Write(szBuf, strlen(szBuf));
 
 #ifdef _DEBUG
     DBG_OUT_W_UTF8(szBuf);
@@ -349,7 +483,7 @@ void OpenLogFile(bool bUseLogFIle)
         std::filesystem::create_directory("log");
     }
 
-//#ifndef _DISTRIBUTE 
+//#ifndef _DISTRIBUTE
     _wfreopen(L"log/syserr.txt", L"w", stderr);
 
     if (bUseLogFIle)
@@ -358,6 +492,13 @@ void OpenLogFile(bool bUseLogFIle)
         CLogFile::Instance().Initialize();
     }
 //#endif
+}
+
+void CloseLogFile()
+{
+    // Flush all buffered output before shutdown
+    g_syserrBuffer.Flush();
+    CLogFile::Instance().Flush();
 }
 
 void OpenConsoleWindow()

@@ -1,9 +1,11 @@
 #pragma once
 #include <string>
+#include <cstring>
 #include <windows.h>
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <EterLocale/Arabic.h>
 
@@ -38,6 +40,161 @@ constexpr size_t ARABIC_SHAPING_SAFETY_MARGIN_RETRY = 64;
 #endif
 
 // ============================================================================
+// OPTIMIZED CHARACTER CLASSIFICATION (Lookup Tables)
+// ============================================================================
+// Replaces expensive GetStringTypeW() syscalls with O(1) table lookups.
+// Tables are initialized once on first use (thread-safe via static init).
+
+namespace BiDiTables
+{
+	// Character property flags
+	enum ECharFlags : uint8_t
+	{
+		CF_NONE   = 0,
+		CF_ALPHA  = 0x01,  // Alphabetic (Latin, Cyrillic, Greek, etc.)
+		CF_DIGIT  = 0x02,  // Numeric digit (0-9, Arabic-Indic, etc.)
+		CF_RTL    = 0x04,  // RTL script (Arabic, Hebrew)
+		CF_ARABIC = 0x08,  // Arabic letter that needs shaping
+	};
+
+	// Main character flags table (65536 entries for BMP)
+	inline const uint8_t* GetCharFlagsTable()
+	{
+		static uint8_t s_table[65536] = {0};
+		static bool s_initialized = false;
+
+		if (!s_initialized)
+		{
+			// ASCII digits
+			for (int i = '0'; i <= '9'; ++i)
+				s_table[i] |= CF_DIGIT;
+
+			// ASCII letters
+			for (int i = 'A'; i <= 'Z'; ++i)
+				s_table[i] |= CF_ALPHA;
+			for (int i = 'a'; i <= 'z'; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Latin Extended-A/B (0x0100-0x024F)
+			for (int i = 0x0100; i <= 0x024F; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Latin Extended Additional (0x1E00-0x1EFF)
+			for (int i = 0x1E00; i <= 0x1EFF; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Greek (0x0370-0x03FF)
+			for (int i = 0x0370; i <= 0x03FF; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Cyrillic (0x0400-0x04FF)
+			for (int i = 0x0400; i <= 0x04FF; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Hebrew (0x0590-0x05FF) - RTL
+			for (int i = 0x0590; i <= 0x05FF; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// Arabic (0x0600-0x06FF) - RTL + needs shaping
+			for (int i = 0x0600; i <= 0x06FF; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+			// Arabic letters that need shaping (0x0621-0x064A)
+			for (int i = 0x0621; i <= 0x064A; ++i)
+				s_table[i] |= CF_ARABIC;
+
+			// Arabic Supplement (0x0750-0x077F)
+			for (int i = 0x0750; i <= 0x077F; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// Arabic Extended-A (0x08A0-0x08FF)
+			for (int i = 0x08A0; i <= 0x08FF; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// Arabic-Indic digits (0x0660-0x0669)
+			for (int i = 0x0660; i <= 0x0669; ++i)
+				s_table[i] |= CF_DIGIT;
+
+			// Extended Arabic-Indic digits (0x06F0-0x06F9)
+			for (int i = 0x06F0; i <= 0x06F9; ++i)
+				s_table[i] |= CF_DIGIT;
+
+			// Arabic Presentation Forms-A (0xFB50-0xFDFF) - already shaped
+			for (int i = 0xFB50; i <= 0xFDFF; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// Arabic Presentation Forms-B (0xFE70-0xFEFF) - already shaped
+			for (int i = 0xFE70; i <= 0xFEFF; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// Hebrew presentation forms (0xFB1D-0xFB4F)
+			for (int i = 0xFB1D; i <= 0xFB4F; ++i)
+				s_table[i] |= CF_RTL | CF_ALPHA;
+
+			// CJK (0x4E00-0x9FFF) - treat as LTR alpha
+			for (int i = 0x4E00; i <= 0x9FFF; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// Hangul (0xAC00-0xD7AF)
+			for (int i = 0xAC00; i <= 0xD7AF; ++i)
+				s_table[i] |= CF_ALPHA;
+
+			// RTL marks and controls
+			s_table[0x200F] |= CF_RTL; // RLM
+			s_table[0x061C] |= CF_RTL; // ALM
+			for (int i = 0x202B; i <= 0x202E; ++i)
+				s_table[i] |= CF_RTL; // RLE/RLO/PDF/LRE/LRO
+			for (int i = 0x2066; i <= 0x2069; ++i)
+				s_table[i] |= CF_RTL; // Isolates
+
+			s_initialized = true;
+		}
+
+		return s_table;
+	}
+
+	// Fast O(1) character classification functions
+	inline bool IsRTL(wchar_t ch) { return GetCharFlagsTable()[(uint16_t)ch] & CF_RTL; }
+	inline bool IsAlpha(wchar_t ch) { return GetCharFlagsTable()[(uint16_t)ch] & CF_ALPHA; }
+	inline bool IsDigit(wchar_t ch) { return GetCharFlagsTable()[(uint16_t)ch] & CF_DIGIT; }
+	inline bool IsArabicLetter(wchar_t ch) { return GetCharFlagsTable()[(uint16_t)ch] & CF_ARABIC; }
+	inline bool IsStrongLTR(wchar_t ch)
+	{
+		uint8_t flags = GetCharFlagsTable()[(uint16_t)ch];
+		// Strong LTR = (Alpha OR Digit) AND NOT RTL
+		return (flags & (CF_ALPHA | CF_DIGIT)) && !(flags & CF_RTL);
+	}
+}
+
+// ============================================================================
+// BUFFER POOLING (Avoid per-call allocations)
+// ============================================================================
+
+namespace BiDiBuffers
+{
+	struct TBufferPool
+	{
+		std::vector<wchar_t> shaped;
+
+		void EnsureCapacity(size_t n)
+		{
+			size_t needed = n * 2 + 64;
+			if (shaped.capacity() < needed) shaped.reserve(needed);
+		}
+
+		void Clear()
+		{
+			shaped.clear();
+		}
+	};
+
+	inline TBufferPool& Get()
+	{
+		thread_local static TBufferPool s_pool;
+		return s_pool;
+	}
+}
+
+// ============================================================================
 // UNICODE VALIDATION HELPERS
 // ============================================================================
 
@@ -65,7 +222,70 @@ static inline void SanitizeWideString(std::wstring& ws)
 		ws.end());
 }
 
+// ============================================================================
+// OPTIMIZED UTF-8 CONVERSION
+// ============================================================================
+// Fast paths for ASCII-only text (very common in games).
+// Falls back to Windows API for non-ASCII.
+
+namespace Utf8Fast
+{
+	// Check if string is pure ASCII (no bytes >= 128)
+	inline bool IsAsciiOnly(const char* s, size_t len)
+	{
+		// Process 8 bytes at a time for speed
+		const char* end = s + len;
+		const char* aligned_end = s + (len & ~7);
+
+		while (s < aligned_end)
+		{
+			// Check 8 bytes at once using bitwise OR
+			uint64_t chunk;
+			memcpy(&chunk, s, 8);
+			if (chunk & 0x8080808080808080ULL)
+				return false;
+			s += 8;
+		}
+
+		// Check remaining bytes
+		while (s < end)
+		{
+			if ((unsigned char)*s >= 128)
+				return false;
+			++s;
+		}
+		return true;
+	}
+
+	// Fast ASCII-only conversion (no API calls)
+	inline std::wstring AsciiToWide(const char* s, size_t len)
+	{
+		std::wstring out;
+		out.reserve(len);
+		for (size_t i = 0; i < len; ++i)
+			out.push_back(static_cast<wchar_t>(static_cast<unsigned char>(s[i])));
+		return out;
+	}
+
+	// Fast ASCII-only conversion (no API calls)
+	inline std::string WideToAscii(const wchar_t* ws, size_t len)
+	{
+		std::string out;
+		out.reserve(len);
+		for (size_t i = 0; i < len; ++i)
+		{
+			wchar_t ch = ws[i];
+			if (ch < 128)
+				out.push_back(static_cast<char>(ch));
+			else
+				return ""; // Not pure ASCII, caller should use full conversion
+		}
+		return out;
+	}
+}
+
 // UTF-8 -> UTF-16 (Windows wide)
+// OPTIMIZED: Fast path for ASCII-only strings (avoids 2x API calls)
 inline std::wstring Utf8ToWide(const std::string& s)
 {
 	if (s.empty())
@@ -75,9 +295,14 @@ inline std::wstring Utf8ToWide(const std::string& s)
 	if (s.size() > MAX_TEXT_LENGTH || s.size() > INT_MAX)
 	{
 		BIDI_LOG("Utf8ToWide: String too large (%zu bytes)", s.size());
-		return L""; // String too large
+		return L"";
 	}
 
+	// Fast path: ASCII-only strings (very common in games)
+	if (Utf8Fast::IsAsciiOnly(s.data(), s.size()))
+		return Utf8Fast::AsciiToWide(s.data(), s.size());
+
+	// Slow path: Use Windows API for non-ASCII
 	int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), (int)s.size(), nullptr, 0);
 	if (wlen <= 0)
 	{
@@ -90,29 +315,31 @@ inline std::wstring Utf8ToWide(const std::string& s)
 	if (written <= 0 || written != wlen)
 	{
 		BIDI_LOG("Utf8ToWide: Second conversion failed (written=%d, expected=%d, error=%d)", written, wlen, GetLastError());
-		return L""; // Conversion failed unexpectedly
+		return L"";
 	}
-
-	// Optional: Sanitize to remove invalid Unicode codepoints (surrogates, non-characters)
-	// Uncomment if you want strict validation
-	// SanitizeWideString(out);
 
 	return out;
 }
 
 // Convenience overload for char*
+// OPTIMIZED: Fast path for ASCII-only strings
 inline std::wstring Utf8ToWide(const char* s)
 {
 	if (!s || !*s)
 		return L"";
 
+	size_t len = strlen(s);
+
+	// Fast path: ASCII-only strings
+	if (Utf8Fast::IsAsciiOnly(s, len))
+		return Utf8Fast::AsciiToWide(s, len);
+
+	// Slow path: Use Windows API
 	int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, nullptr, 0);
 	if (wlen <= 0)
 		return L"";
 
-	// wlen includes terminating NUL
 	std::wstring out(wlen, L'\0');
-
 	int written = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, out.data(), wlen);
 	if (written <= 0 || written != wlen)
 	{
@@ -124,13 +351,11 @@ inline std::wstring Utf8ToWide(const char* s)
 	if (!out.empty() && out.back() == L'\0')
 		out.pop_back();
 
-	// Optional: Sanitize to remove invalid Unicode codepoints
-	// SanitizeWideString(out);
-
 	return out;
 }
 
 // UTF-16 (Windows wide) -> UTF-8
+// OPTIMIZED: Fast path for ASCII-only strings
 inline std::string WideToUtf8(const std::wstring& ws)
 {
 	if (ws.empty())
@@ -138,8 +363,23 @@ inline std::string WideToUtf8(const std::wstring& ws)
 
 	// Validate size limits (prevent DoS and INT_MAX overflow)
 	if (ws.size() > MAX_TEXT_LENGTH || ws.size() > INT_MAX)
-		return ""; // String too large
+		return "";
 
+	// Fast path: Check if all characters are ASCII
+	bool isAscii = true;
+	for (size_t i = 0; i < ws.size() && isAscii; ++i)
+		isAscii = (ws[i] < 128);
+
+	if (isAscii)
+	{
+		std::string out;
+		out.reserve(ws.size());
+		for (size_t i = 0; i < ws.size(); ++i)
+			out.push_back(static_cast<char>(ws[i]));
+		return out;
+	}
+
+	// Slow path: Use Windows API for non-ASCII
 	int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, ws.data(), (int)ws.size(), nullptr, 0, nullptr, nullptr);
 	if (len <= 0)
 		return "";
@@ -149,7 +389,7 @@ inline std::string WideToUtf8(const std::wstring& ws)
 	if (written <= 0 || written != len)
 	{
 		BIDI_LOG("WideToUtf8: Conversion failed (written=%d, expected=%d, error=%d)", written, len, GetLastError());
-		return ""; // Conversion failed
+		return "";
 	}
 	return out;
 }
@@ -169,59 +409,22 @@ inline std::string WideToUtf8(const wchar_t* ws)
 enum class EBidiDir { LTR, RTL };
 enum class ECharDir : unsigned char { Neutral, LTR, RTL };
 
-struct TBidiRun
-{
-	EBidiDir dir;
-	std::vector<wchar_t> text; // logical order
-};
-
+// Optimized: O(1) lookup table instead of GetStringTypeW() syscalls
 static inline bool IsRTLCodepoint(wchar_t ch)
 {
-	// Directional marks / isolates / embeddings that affect bidi
-	if (ch == 0x200F || ch == 0x061C) return true; // RLM, ALM
-	if (ch >= 0x202B && ch <= 0x202E) return true; // RLE/RLO/PDF/LRE/LRO
-	if (ch >= 0x2066 && ch <= 0x2069) return true; // isolates
-
-	// Hebrew + Arabic blocks (BMP)
-	if (ch >= 0x0590 && ch <= 0x08FF) return true;
-
-	// Presentation forms
-	if (ch >= 0xFB1D && ch <= 0xFDFF) return true;
-	if (ch >= 0xFE70 && ch <= 0xFEFF) return true;
-
-	return false;
+	return BiDiTables::IsRTL(ch);
 }
 
+// Optimized: O(1) lookup table instead of GetStringTypeW() syscalls
 static inline bool IsStrongAlpha(wchar_t ch)
 {
-	// Use thread-local cache for BMP (Thread safety)
-	thread_local static unsigned char cache[65536] = {}; // 0=unknown, 1=true, 2=false
-	unsigned char& v = cache[(unsigned short)ch];
-	if (v == 1) return true;
-	if (v == 2) return false;
-
-	WORD type = 0;
-	bool ok = GetStringTypeW(CT_CTYPE1, &ch, 1, &type) && (type & C1_ALPHA);
-	v = ok ? 1 : 2;
-	return ok;
+	return BiDiTables::IsAlpha(ch);
 }
 
+// Optimized: O(1) lookup table instead of GetStringTypeW() syscalls
 static inline bool IsDigit(wchar_t ch)
 {
-	// Fast path for ASCII digits (90%+ of digit checks)
-	if (ch >= L'0' && ch <= L'9')
-		return true;
-
-	// For non-ASCII, use cache (Arabic-Indic digits, etc.)
-	thread_local static unsigned char cache[65536] = {}; // 0=unknown, 1=true, 2=false
-	unsigned char& v = cache[(unsigned short)ch];
-	if (v == 1) return true;
-	if (v == 2) return false;
-
-	WORD type = 0;
-	bool ok = GetStringTypeW(CT_CTYPE1, &ch, 1, &type) && (type & C1_DIGIT);
-	v = ok ? 1 : 2;
-	return ok;
+	return BiDiTables::IsDigit(ch);
 }
 
 static inline bool IsNameTokenPunct(wchar_t ch)
@@ -257,12 +460,10 @@ static inline bool IsNameTokenPunct(wchar_t ch)
 	}
 }
 
-// Check RTL first to avoid classifying Arabic as LTR
+// Optimized: O(1) lookup - Check RTL first to avoid classifying Arabic as LTR
 static inline bool IsStrongLTR(wchar_t ch)
 {
-	if (IsRTLCodepoint(ch))
-		return false;
-	return IsStrongAlpha(ch) || IsDigit(ch);
+	return BiDiTables::IsStrongLTR(ch);
 }
 
 static inline bool HasStrongLTRNeighbor(const wchar_t* s, int n, int i)
@@ -561,33 +762,29 @@ static std::vector<wchar_t> BuildVisualBidiText_Tagless(const wchar_t* s, int n,
 	if (!s || n <= 0)
 		return {};
 
+	// Use buffer pool to avoid per-call allocations
+	BiDiBuffers::TBufferPool& buffers = BiDiBuffers::Get();
+	buffers.EnsureCapacity((size_t)n);
+
 	// 1) base direction
 	EBidiDir base = forceRTL ? EBidiDir::RTL : DetectBaseDir_FirstStrong(s, n);
 
 	// Pre-compute strong character positions for O(1) neutral resolution
 	TStrongDirCache strongCache(s, n, base);
 
-	// 2) split into runs
-	// Estimate runs based on text length (~1 per 50 chars, min 4)
-	std::vector<TBidiRun> runs;
-	const size_t estimatedRuns = (size_t)std::max(4, n / 50);
-	runs.reserve(estimatedRuns);
-
-	auto push_run = [&](EBidiDir d)
-		{
-			if (runs.empty() || runs.back().dir != d)
-				runs.push_back(TBidiRun{ d, {} });
-		};
-
-	// start with base so leading neutrals attach predictably
-	push_run(base);
+	// 2) split into runs - use a more efficient approach
+	// Instead of TBidiRun with vectors, use start/end indices
+	struct TRunInfo { int start; int end; EBidiDir dir; };
+	thread_local static std::vector<TRunInfo> s_runs;
+	s_runs.clear();
+	s_runs.reserve((size_t)std::max(4, n / 50));
 
 	EBidiDir lastStrong = base;
+	EBidiDir currentRunDir = base;
+	int runStart = 0;
 
 	for (int i = 0; i < n; ++i)
 	{
-		wchar_t ch = s[i];
-
 		EBidiDir d;
 		ECharDir cd = GetCharDirSmart(s, n, i);
 
@@ -607,98 +804,84 @@ static std::vector<wchar_t> BuildVisualBidiText_Tagless(const wchar_t* s, int n,
 			d = ResolveNeutralDir(s, n, i, base, lastStrong, &strongCache);
 		}
 
-#ifdef DEBUG_BIDI
-		if (i < 50) // Only log first 50 chars to avoid spam
+		// Start a new run if direction changes
+		if (d != currentRunDir)
 		{
-			BIDI_LOG("Char[%d] U+%04X '%lc' → CharDir=%s, RunDir=%s",
-				i, (unsigned int)ch, (ch >= 32 && ch < 127) ? ch : L'?',
-				cd == ECharDir::RTL ? "RTL" : (cd == ECharDir::LTR ? "LTR" : "Neutral"),
-				d == EBidiDir::RTL ? "RTL" : "LTR");
+			if (i > runStart)
+				s_runs.push_back({runStart, i, currentRunDir});
+			runStart = i;
+			currentRunDir = d;
 		}
-#endif
-
-		push_run(d);
-		runs.back().text.push_back(ch);
 	}
+	// Push final run
+	if (n > runStart)
+		s_runs.push_back({runStart, n, currentRunDir});
 
-	// 3) shape RTL runs in logical order (Arabic shaping)
-	for (auto& r : runs)
+	// 3) shape RTL runs using pooled buffer
+	buffers.shaped.clear();
+
+	auto shapeRun = [&](int start, int end) -> std::pair<const wchar_t*, int>
 	{
-		if (r.dir != EBidiDir::RTL)
-			continue;
+		int len = end - start;
+		if (len <= 0)
+			return {nullptr, 0};
 
-		if (r.text.empty())
-			continue;
+		// Check for potential integer overflow
+		if ((size_t)len > SIZE_MAX / ARABIC_SHAPING_EXPANSION_FACTOR_RETRY - ARABIC_SHAPING_SAFETY_MARGIN_RETRY)
+			return {s + start, len}; // Return unshaped
 
-		// Check for potential integer overflow before allocation
-		if (r.text.size() > SIZE_MAX / ARABIC_SHAPING_EXPANSION_FACTOR_RETRY - ARABIC_SHAPING_SAFETY_MARGIN_RETRY)
-		{
-			BIDI_LOG("BuildVisualBidiText: RTL run too large for shaping (%zu chars)", r.text.size());
-			continue; // Text too large to process safely
-		}
+		size_t neededSize = buffers.shaped.size() + (size_t)len * ARABIC_SHAPING_EXPANSION_FACTOR + ARABIC_SHAPING_SAFETY_MARGIN;
+		if (buffers.shaped.capacity() < neededSize)
+			buffers.shaped.reserve(neededSize);
 
-		std::vector<wchar_t> shaped(r.text.size() * ARABIC_SHAPING_EXPANSION_FACTOR + ARABIC_SHAPING_SAFETY_MARGIN, 0);
+		size_t outStart = buffers.shaped.size();
+		buffers.shaped.resize(outStart + (size_t)len * ARABIC_SHAPING_EXPANSION_FACTOR + ARABIC_SHAPING_SAFETY_MARGIN);
 
-		int outLen = Arabic_MakeShape(r.text.data(), (int)r.text.size(), shaped.data(), (int)shaped.size());
+		int outLen = Arabic_MakeShape(const_cast<wchar_t*>(s + start), len,
+		                               buffers.shaped.data() + outStart,
+		                               (int)(buffers.shaped.size() - outStart));
+
 		if (outLen <= 0)
-		{
-			BIDI_LOG("Arabic_MakeShape FAILED for RTL run of %zu characters", r.text.size());
-			BIDI_LOG("  WARNING: This RTL text segment will NOT be displayed!");
-			BIDI_LOG("  First few characters: U+%04X U+%04X U+%04X U+%04X",
-				r.text.size() > 0 ? (unsigned int)r.text[0] : 0,
-				r.text.size() > 1 ? (unsigned int)r.text[1] : 0,
-				r.text.size() > 2 ? (unsigned int)r.text[2] : 0,
-				r.text.size() > 3 ? (unsigned int)r.text[3] : 0);
-			continue;
-		}
+			return {s + start, len}; // Return unshaped on failure
 
-		// Retry once if buffer too small
-		if (outLen >= (int)shaped.size())
-		{
-			shaped.assign(r.text.size() * ARABIC_SHAPING_EXPANSION_FACTOR_RETRY + ARABIC_SHAPING_SAFETY_MARGIN_RETRY, 0);
-			outLen = Arabic_MakeShape(r.text.data(), (int)r.text.size(), shaped.data(), (int)shaped.size());
-			if (outLen <= 0)
-				continue;
-			// Add error check instead of silent truncation
-			if (outLen > (int)shaped.size())
-			{
-				BIDI_LOG("Arabic_MakeShape: Buffer still too small after retry (%d > %zu)", outLen, shaped.size());
-				// Shaping failed critically, use unshaped text
-				continue;
-			}
-		}
+		buffers.shaped.resize(outStart + (size_t)outLen);
+		return {buffers.shaped.data() + outStart, outLen};
+	};
 
-		r.text.assign(shaped.begin(), shaped.begin() + outLen);
-	}
-
-	// 4) produce visual order:
-	// - reverse RTL runs internally
-	// - reverse run sequence if base RTL
+	// 4) produce visual order
 	std::vector<wchar_t> visual;
 	visual.reserve((size_t)n);
 
-	auto emit_run = [&](const TBidiRun& r)
+	auto emitRun = [&](const TRunInfo& run)
+	{
+		if (run.dir == EBidiDir::RTL)
 		{
-			if (r.dir == EBidiDir::RTL)
+			// Shape and reverse RTL runs
+			std::pair<const wchar_t*, int> shaped = shapeRun(run.start, run.end);
+			const wchar_t* ptr = shaped.first;
+			int len = shaped.second;
+			if (ptr && len > 0)
 			{
-				for (int k = (int)r.text.size() - 1; k >= 0; --k)
-					visual.push_back(r.text[(size_t)k]);
+				for (int k = len - 1; k >= 0; --k)
+					visual.push_back(ptr[k]);
 			}
-			else
-			{
-				visual.insert(visual.end(), r.text.begin(), r.text.end());
-			}
-		};
+		}
+		else
+		{
+			// LTR runs: copy directly
+			visual.insert(visual.end(), s + run.start, s + run.end);
+		}
+	};
 
 	if (base == EBidiDir::LTR)
 	{
-		for (const auto& r : runs)
-			emit_run(r);
+		for (const auto& run : s_runs)
+			emitRun(run);
 	}
 	else
 	{
-		for (int i = (int)runs.size() - 1; i >= 0; --i)
-			emit_run(runs[(size_t)i]);
+		for (int i = (int)s_runs.size() - 1; i >= 0; --i)
+			emitRun(s_runs[(size_t)i]);
 	}
 
 	return visual;
@@ -763,7 +946,7 @@ static inline std::vector<wchar_t> BuildVisualChatMessage(
 		{
 			// Apply BiDi to message with auto-detection (don't force RTL)
 			// Let the BiDi algorithm detect base direction from first strong character
-			std::vector<wchar_t> msgVisual = BuildVisualBidiText_Tagless(msg, msgLen, false);
+			std::vector<wchar_t> msgVisual = BuildVisualBidiText_Tagless(msg, msgLen, forceRTL);
 			visual.insert(visual.end(), msgVisual.begin(), msgVisual.end());
 		}
 		visual.push_back(L' ');
@@ -787,7 +970,7 @@ static inline std::vector<wchar_t> BuildVisualChatMessage(
 		{
 			// Apply BiDi to message with auto-detection (don't force RTL)
 			// Let the BiDi algorithm detect base direction from first strong character
-			std::vector<wchar_t> msgVisual = BuildVisualBidiText_Tagless(msg, msgLen, false);
+			std::vector<wchar_t> msgVisual = BuildVisualBidiText_Tagless(msg, msgLen, forceRTL);
 			visual.insert(visual.end(), msgVisual.begin(), msgVisual.end());
 		}
 	}

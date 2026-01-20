@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "Arabic.h"
 #include <assert.h>
+#include <vector>
 
 enum ARABIC_CODE
 {
@@ -243,110 +244,151 @@ bool Arabic_IsComb2(wchar_t code)
 	return false;
 }
 
+// Helper: Check if a character can join to the right (has INITIAL or MEDIAL form)
+static inline bool Arabic_CanJoinRight(wchar_t code)
+{
+	if (!Arabic_IsInMap(code))
+		return false;
+	return Arabic_GetMap(code, INITIAL) != 0 || Arabic_GetMap(code, MEDIAL) != 0;
+}
+
+// Helper: Check if a character can join to the left (has MEDIAL or FINAL form)
+static inline bool Arabic_CanJoinLeft(wchar_t code)
+{
+	if (!Arabic_IsInMap(code))
+		return false;
+	return Arabic_GetMap(code, MEDIAL) != 0 || Arabic_GetMap(code, FINAL) != 0 || Arabic_IsNext(code);
+}
+
+// Optimized O(n) Arabic shaping algorithm
+// Previous: O(n²) due to backward/forward scans for each character
+// Now: O(n) single forward pass with state tracking
 size_t Arabic_MakeShape(wchar_t* src, size_t srcLen, wchar_t* dst, size_t dstLen)
 {
-	// Runtime validation instead of assert (which is disabled in release builds)
+	// Runtime validation
 	if (!src || !dst || srcLen == 0 || dstLen < srcLen)
 		return 0;
 
-	const size_t srcLastIndex = srcLen - 1;
+	// Phase 1: Pre-scan to find the next non-composing Arabic letter for each position
+	// This converts O(n) inner loops into O(1) lookups
+	// Use thread-local buffer to avoid per-call allocation
+	thread_local static std::vector<size_t> s_nextArabic;
+	if (s_nextArabic.size() < srcLen + 1)
+		s_nextArabic.resize(srcLen + 1);
 
-	unsigned dstIndex = 0;	
+	// Build next-arabic lookup (reverse scan)
+	size_t nextArabicIdx = srcLen; // Invalid index = no next arabic
+	for (size_t i = srcLen; i > 0; --i)
+	{
+		size_t idx = i - 1;
+		s_nextArabic[idx] = nextArabicIdx;
+
+		wchar_t ch = src[idx];
+		if (Arabic_IsInMap(ch) && !Arabic_IsInComposing(ch))
+			nextArabicIdx = idx;
+	}
+	s_nextArabic[srcLen] = srcLen; // Sentinel
+
+	// Phase 2: Single forward pass with state tracking
+	size_t dstIndex = 0;
+	bool prevJoins = false; // Does previous Arabic letter join to the right?
+
 	for (size_t srcIndex = 0; srcIndex < srcLen; ++srcIndex)
 	{
 		wchar_t cur = src[srcIndex];
 
-		//printf("now %x\n", cur);
+		// Composing marks: copy directly, don't affect joining state
+		if (Arabic_IsInComposing(cur))
+		{
+			if (dstIndex < dstLen)
+				dst[dstIndex++] = cur;
+			continue;
+		}
 
 		if (Arabic_IsInMap(cur))
 		{
-			// 이전 글자 얻어내기
-			wchar_t prev = 0;			
-			{
-				size_t prevIndex = srcIndex;
-				while (prevIndex > 0)
-				{
-					prevIndex--;
-					prev = src[prevIndex];
-					//printf("\tprev %d:%x\n", prevIndex, cur);
-					if (Arabic_IsInComposing(prev))
-						continue;
-					else
-						break;
-				}
-
-				if ((srcIndex == 0) || 
-					(!Arabic_IsInMap(prev)) || 
-					(!Arabic_GetMap(prev, INITIAL) && !Arabic_GetMap(prev, MEDIAL)))
-				{
-					//printf("\tprev not defined\n");
-					prev = 0;
-				}
-			}
-
-			// 다음 글자 얻어내기
+			// Find next joinable Arabic letter using pre-computed lookup
 			wchar_t next = 0;
+			size_t nextIdx = s_nextArabic[srcIndex];
+			if (nextIdx < srcLen)
 			{
-				size_t nextIndex = srcIndex;
-				while (nextIndex < srcLastIndex)
-				{
-					nextIndex++;
-					next = src[nextIndex];
-					if (Arabic_IsInComposing(next))
-						continue;
-					else
-						break;
-				}
-
-				if ((nextIndex == srcLen) || 
-					(!Arabic_IsInMap(next)) ||
-					(!Arabic_GetMap(next, MEDIAL) && !Arabic_GetMap(next, FINAL) && !Arabic_IsNext(next)))
-				{
-					//printf("\tnext not defined\n");
-					next = 0;
-				}
+				wchar_t nextChar = src[nextIdx];
+				if (Arabic_CanJoinLeft(nextChar))
+					next = nextChar;
 			}
 
-			if (Arabic_IsComb1(cur) && Arabic_IsComb2(next))
+			// Handle LAM-ALEF composition
+			if (Arabic_IsComb1(cur) && nextIdx < srcLen && Arabic_IsComb2(src[nextIdx]))
 			{
-				if (prev)
-					dst[dstIndex] = Arabic_GetComposition(cur, next, FINAL);
+				wchar_t composed;
+				if (prevJoins)
+					composed = Arabic_GetComposition(cur, src[nextIdx], FINAL);
 				else
-					dst[dstIndex] = Arabic_GetComposition(cur, next, ISOLATED);
+					composed = Arabic_GetComposition(cur, src[nextIdx], ISOLATED);
 
-				//printf("\tGot me a complex:%x\n", dst[dstIndex]);
+				if (dstIndex < dstLen)
+					dst[dstIndex++] = composed;
 
-				srcIndex++;
-				dstIndex++;				
+				// Skip the ALEF that was combined
+				srcIndex = nextIdx;
+				// LAM-ALEF doesn't join to the right
+				prevJoins = false;
+				continue;
 			}
-			else if (prev && next && (dst[dstIndex] = Arabic_GetMap(cur, MEDIAL)))
+
+			// Determine form based on joining context
+			wchar_t shaped = 0;
+			bool curJoinsRight = false;
+
+			if (prevJoins && next)
 			{
-				//printf("\tGot prev & next:%x\n", dst[dstIndex]);
-				dstIndex++;				
+				// Both sides join: MEDIAL
+				shaped = Arabic_GetMap(cur, MEDIAL);
+				if (shaped)
+					curJoinsRight = Arabic_CanJoinRight(cur);
 			}
-			else if (prev && (dst[dstIndex] = Arabic_GetMap(cur, FINAL)))
+
+			if (!shaped && prevJoins)
 			{
-				//printf("\tGot prev:%x\n", dst[dstIndex]);
-				dstIndex++;				
+				// Only left joins: FINAL
+				shaped = Arabic_GetMap(cur, FINAL);
+				// FINAL form doesn't extend to the right
+				curJoinsRight = false;
 			}
-			else if (next && (dst[dstIndex] = Arabic_GetMap(cur, INITIAL)))
+
+			if (!shaped && next)
 			{
-				//printf("\tGot next:%x\n", dst[dstIndex]);
-				dstIndex++;				
+				// Only right joins: INITIAL
+				shaped = Arabic_GetMap(cur, INITIAL);
+				if (shaped)
+					curJoinsRight = Arabic_CanJoinRight(cur);
 			}
-			else
+
+			if (!shaped)
 			{
-				dst[dstIndex] = Arabic_GetMap(cur, ISOLATED);
-				//printf("\tGot nothing:%x\n", dst[dstIndex]);
-				dstIndex++;
+				// No joining: ISOLATED
+				shaped = Arabic_GetMap(cur, ISOLATED);
+				curJoinsRight = false;
 			}
+
+			if (!shaped)
+				shaped = cur; // Fallback to original if no mapping
+
+			if (dstIndex < dstLen)
+				dst[dstIndex++] = shaped;
+
+			// Update state for next character
+			prevJoins = curJoinsRight;
 		}
 		else
 		{
-			dst[dstIndex] = cur;
-			dstIndex++;
+			// Non-Arabic character: copy directly, breaks joining
+			if (dstIndex < dstLen)
+				dst[dstIndex++] = cur;
+			prevJoins = false;
 		}
 	}
+
 	return dstIndex;
 }
 

@@ -238,15 +238,87 @@ void CGraphicTextInstance::Update()
 	}
 
 	// Tag-aware BiDi rendering: Parse tags, apply BiDi per segment, track colors/hyperlinks
+	// OPTIMIZED: Use helper lambda to eliminate code duplication (was repeated 5+ times)
 	if (hasRTL || hasTags)
 	{
 		DWORD currentColor = dwColor;
 		int hyperlinkStep = 0; // 0=normal, 1=collecting metadata, 2=visible hyperlink
 		std::wstring hyperlinkMetadata;
-		std::vector<wchar_t> currentSegment;
+
+		// Use thread-local buffer to avoid per-call allocation
+		thread_local static std::vector<wchar_t> s_currentSegment;
+		s_currentSegment.clear();
 
 		SHyperlink currentHyperlink;
 		currentHyperlink.sx = currentHyperlink.ex = 0;
+
+		// In chat RTL, force RTL base direction so prefixes like "[hyperlink]" don't flip the paragraph to LTR.
+		const bool forceRTLForBidi = (m_isChatMessage && m_computedRTL);
+
+		// OPTIMIZED: Single helper function for flushing segments (eliminates 5x code duplication)
+		auto FlushSegment = [&](DWORD segColor) -> int
+		{
+			if (s_currentSegment.empty())
+				return 0;
+
+			int totalWidth = 0;
+
+			// Apply BiDi transformation using optimized BuildVisualBidiText_Tagless
+			std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
+				s_currentSegment.data(), (int)s_currentSegment.size(), forceRTLForBidi);
+
+			for (size_t j = 0; j < visual.size(); ++j)
+			{
+				int w = __DrawCharacter(pFontTexture, visual[j], segColor);
+				totalWidth += w;
+			}
+
+			s_currentSegment.clear();
+			return totalWidth;
+		};
+
+		// Prepend glyphs to the already-built draw list (used to place hyperlink before message in RTL chat).
+		auto PrependGlyphs = [&](CGraphicFontTexture* pFontTexture,
+		                         const std::vector<wchar_t>& chars,
+		                         DWORD color,
+		                         int& outWidth)
+		{
+			outWidth = 0;
+
+			// Use thread-local buffers to avoid allocation
+			thread_local static std::vector<CGraphicFontTexture::TCharacterInfomation*> s_newCharInfos;
+			thread_local static std::vector<DWORD> s_newColors;
+			s_newCharInfos.clear();
+			s_newColors.clear();
+			s_newCharInfos.reserve(chars.size());
+			s_newColors.reserve(chars.size());
+
+			for (size_t k = 0; k < chars.size(); ++k)
+			{
+				auto* pInfo = pFontTexture->GetCharacterInfomation(chars[k]);
+				if (!pInfo)
+					continue;
+
+				s_newCharInfos.push_back(pInfo);
+				s_newColors.push_back(color);
+
+				outWidth += pInfo->advance;
+				m_textHeight = std::max((WORD)pInfo->height, m_textHeight);
+			}
+
+			// Insert at the beginning of the draw list.
+			m_pCharInfoVector.insert(m_pCharInfoVector.begin(), s_newCharInfos.begin(), s_newCharInfos.end());
+			m_dwColorInfoVector.insert(m_dwColorInfoVector.begin(), s_newColors.begin(), s_newColors.end());
+
+			// Shift any already-recorded hyperlinks to the right.
+			for (auto& link : m_hyperlinkVector)
+			{
+				link.sx += outWidth;
+				link.ex += outWidth;
+			}
+
+			m_textWidth += outWidth;
+		};
 
 		// Parse text with tags
 		for (int i = 0; i < wTextLen;)
@@ -257,37 +329,15 @@ void CGraphicTextInstance::Update()
 
 			if (tagType == TEXT_TAG_COLOR)
 			{
-				// Flush current segment with BiDi before changing color
-				if (!currentSegment.empty())
-				{
-					// Use auto-detection for BiDi (don't force RTL)
-					std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
-						currentSegment.data(), (int)currentSegment.size(), false);
-					for (size_t j = 0; j < visual.size(); ++j)
-					{
-						int w = __DrawCharacter(pFontTexture, visual[j], currentColor);
-						currentHyperlink.ex += w;
-					}
-					currentSegment.clear();
-				}
+				// Flush current segment before changing color
+				currentHyperlink.ex += FlushSegment(currentColor);
 				currentColor = htoi(tagExtra.c_str(), 8);
 				i += tagLen;
 			}
 			else if (tagType == TEXT_TAG_RESTORE_COLOR)
 			{
 				// Flush segment before restoring color
-				if (!currentSegment.empty())
-				{
-					// Use auto-detection for BiDi (don't force RTL)
-					std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
-						currentSegment.data(), (int)currentSegment.size(), false);
-					for (size_t j = 0; j < visual.size(); ++j)
-					{
-						int w = __DrawCharacter(pFontTexture, visual[j], currentColor);
-						currentHyperlink.ex += w;
-					}
-					currentSegment.clear();
-				}
+				currentHyperlink.ex += FlushSegment(currentColor);
 				currentColor = dwColor;
 				i += tagLen;
 			}
@@ -303,18 +353,7 @@ void CGraphicTextInstance::Update()
 				{
 					// End of metadata, start visible section
 					// Flush any pending non-hyperlink segment first
-					if (!currentSegment.empty())
-					{
-						// Use auto-detection for BiDi (don't force RTL)
-						std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
-							currentSegment.data(), (int)currentSegment.size(), false);
-						for (size_t j = 0; j < visual.size(); ++j)
-						{
-							int w = __DrawCharacter(pFontTexture, visual[j], currentColor);
-							currentHyperlink.ex += w;
-						}
-						currentSegment.clear();
-					}
+					currentHyperlink.ex += FlushSegment(currentColor);
 
 					hyperlinkStep = 2;
 					currentHyperlink.text = hyperlinkMetadata;
@@ -323,80 +362,85 @@ void CGraphicTextInstance::Update()
 				else if (hyperlinkStep == 2)
 				{
 					// End of visible section - render hyperlink text with proper Arabic handling
-					// Format: [Arabic Text] or [English Text]
-					// Keep brackets in position, reverse Arabic content between them
-					if (!currentSegment.empty())
+					// In RTL chat: we want the hyperlink chunk to appear BEFORE the message, even if logically appended.
+					if (!s_currentSegment.empty())
 					{
-						// Find bracket positions
+						// OPTIMIZED: Use thread-local buffer for visible rendering
+						thread_local static std::vector<wchar_t> s_visibleToRender;
+						s_visibleToRender.clear();
+
+						// Find bracket positions: [ ... ]
 						int openBracket = -1, closeBracket = -1;
-						for (size_t idx = 0; idx < currentSegment.size(); ++idx)
+						for (size_t idx = 0; idx < s_currentSegment.size(); ++idx)
 						{
-							if (currentSegment[idx] == L'[' && openBracket == -1)
+							if (s_currentSegment[idx] == L'[' && openBracket == -1)
 								openBracket = (int)idx;
-							else if (currentSegment[idx] == L']' && closeBracket == -1)
+							else if (s_currentSegment[idx] == L']' && closeBracket == -1)
 								closeBracket = (int)idx;
 						}
 
 						if (openBracket >= 0 && closeBracket > openBracket)
 						{
-							// Extract content between brackets
-							std::vector<wchar_t> content(
-								currentSegment.begin() + openBracket + 1,
-								currentSegment.begin() + closeBracket);
+							// Keep '['
+							s_visibleToRender.push_back(L'[');
 
-							// Apply Arabic shaping to content
-							std::vector<wchar_t> shaped(content.size() * 2 + 16, 0);
-							int shapedLen = Arabic_MakeShape(content.data(), (int)content.size(),
-							                                 shaped.data(), (int)shaped.size());
+							// Extract inside content and apply BiDi
+							thread_local static std::vector<wchar_t> s_content;
+							s_content.assign(
+								s_currentSegment.begin() + openBracket + 1,
+								s_currentSegment.begin() + closeBracket);
 
-							// Render: "[" + reversed_arabic + "]"
-							// 1. Opening bracket
-							int w = __DrawCharacter(pFontTexture, L'[', currentColor);
-							currentHyperlink.ex += w;
+							// FIX: Use false to let BiDi auto-detect direction from content
+							// This ensures English items like [Sword+9] stay LTR
+							// while Arabic items like [درع فولاذي+9] are properly RTL
+							std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
+								s_content.data(), (int)s_content.size(), false);
 
-							// 2. Arabic content (shaped and REVERSED for RTL display)
-							if (shapedLen > 0)
-							{
-								for (int j = shapedLen - 1; j >= 0; --j)
-								{
-									w = __DrawCharacter(pFontTexture, shaped[j], currentColor);
-									currentHyperlink.ex += w;
-								}
-							}
-							else
-							{
-								// Fallback: reverse original content
-								for (int j = (int)content.size() - 1; j >= 0; --j)
-								{
-									w = __DrawCharacter(pFontTexture, content[j], currentColor);
-									currentHyperlink.ex += w;
-								}
-							}
+							s_visibleToRender.insert(s_visibleToRender.end(), visual.begin(), visual.end());
 
-							// 3. Closing bracket
-							w = __DrawCharacter(pFontTexture, L']', currentColor);
-							currentHyperlink.ex += w;
-
-							// 4. Render any text after closing bracket (if any)
-							for (size_t idx = closeBracket + 1; idx < currentSegment.size(); ++idx)
-							{
-								w = __DrawCharacter(pFontTexture, currentSegment[idx], currentColor);
-								currentHyperlink.ex += w;
-							}
+							// Keep ']'
+							s_visibleToRender.push_back(L']');
 						}
 						else
 						{
-							// No brackets found - render as-is (shouldn't happen for hyperlinks)
-							for (size_t j = 0; j < currentSegment.size(); ++j)
+							// No brackets: apply BiDi to whole segment
+							// FIX: Use false to let BiDi auto-detect direction from content
+							std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
+								s_currentSegment.data(), (int)s_currentSegment.size(), false);
+
+							s_visibleToRender.insert(s_visibleToRender.end(), visual.begin(), visual.end());
+						}
+
+						// Ensure a space AFTER the hyperlink chunk (so it becomes "[hyperlink] اختبار...")
+						s_visibleToRender.push_back(L' ');
+
+						// Key behavior:
+						// In RTL chat, place hyperlink BEFORE the message by prepending glyphs.
+						if (m_isChatMessage && m_computedRTL)
+						{
+							int addedWidth = 0;
+							PrependGlyphs(pFontTexture, s_visibleToRender, currentColor, addedWidth);
+
+							// Record the hyperlink range at the beginning (0..addedWidth)
+							currentHyperlink.sx = 0;
+							currentHyperlink.ex = addedWidth;
+							m_hyperlinkVector.push_back(currentHyperlink);
+						}
+						else
+						{
+							// LTR or non-chat: keep original "append" behavior
+							currentHyperlink.sx = currentHyperlink.ex;
+							for (size_t j = 0; j < s_visibleToRender.size(); ++j)
 							{
-								int w = __DrawCharacter(pFontTexture, currentSegment[j], currentColor);
+								int w = __DrawCharacter(pFontTexture, s_visibleToRender[j], currentColor);
 								currentHyperlink.ex += w;
 							}
+							m_hyperlinkVector.push_back(currentHyperlink);
 						}
-						currentSegment.clear();
 					}
-					m_hyperlinkVector.push_back(currentHyperlink);
+
 					hyperlinkStep = 0;
+					s_currentSegment.clear();
 				}
 				i += tagLen;
 			}
@@ -411,24 +455,14 @@ void CGraphicTextInstance::Update()
 				{
 					// Add to current segment
 					// Will be BiDi-processed for normal text, or rendered directly for hyperlinks
-					currentSegment.push_back(wTextBuf[i]);
+					s_currentSegment.push_back(wTextBuf[i]);
 				}
 				i += tagLen;
 			}
 		}
 
-		// Flush any remaining segment
-		if (!currentSegment.empty())
-		{
-			// Use auto-detection for BiDi (don't force RTL)
-			std::vector<wchar_t> visual = BuildVisualBidiText_Tagless(
-				currentSegment.data(), (int)currentSegment.size(), false);
-			for (size_t j = 0; j < visual.size(); ++j)
-			{
-				int w = __DrawCharacter(pFontTexture, visual[j], currentColor);
-				currentHyperlink.ex += w;
-			}
-		}
+		// Flush any remaining segment using optimized helper
+		currentHyperlink.ex += FlushSegment(currentColor);
 
 		pFontTexture->UpdateTexture();
 		m_isUpdate = true;
