@@ -14,9 +14,9 @@ public:
 	bool Initialize();
 	void Destroy();
 
-	// Get an FT_Face for a given face name. The face is owned by CFontManager.
-	// Callers must NOT call FT_Done_Face on it.
-	FT_Face GetFace(const char* faceName);
+	// Create a NEW FT_Face for the given font name.
+	// The caller OWNS the returned face and must call FT_Done_Face on it when done.
+	FT_Face CreateFace(const char* faceName);
 
 	FT_Library GetLibrary() const { return m_ftLibrary; }
 
@@ -34,6 +34,6 @@ private:
 	// faceName (lowercase) -> file path
 	std::unordered_map<std::string, std::string> m_fontPathMap;
 
-	// filePath -> FT_Face (cached, shared across sizes)
-	std::unordered_map<std::string, FT_Face> m_faceCache;
+	// faceName (lowercase) -> resolved file system path (caches disk lookups)
+	std::unordered_map<std::string, std::string> m_resolvedPathCache;
 };

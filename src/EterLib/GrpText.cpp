@@ -33,7 +33,7 @@ CGraphicText::TType CGraphicText::Type()
 
 bool CGraphicText::OnLoad(int /*iSize*/, const void* /*c_pvBuf*/)
 {
-	static char strName[32];
+	char strName[32];
 	int size;
 	bool bItalic = false;
 
@@ -50,7 +50,7 @@ bool CGraphicText::OnLoad(int /*iSize*/, const void* /*c_pvBuf*/)
 		strName[nameLen] = '\0';
 		++p;
 
-		static char num[8];
+		char num[8];
 
 		int i = 0;
 		while (*p && isdigit(*p))

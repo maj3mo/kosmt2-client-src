@@ -534,9 +534,7 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 	}
 
 	static std::unordered_map<LPDIRECT3DTEXTURE9, std::vector<SVertex>> s_vtxBatches;
-	for (auto& [pTexture, vtxBatch] : s_vtxBatches) {
-		vtxBatch.clear();
-	}
+	s_vtxBatches.clear();
 
 	STATEMANAGER.SaveRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 	STATEMANAGER.SaveRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
@@ -612,7 +610,7 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 					}
 				}
 
-				fFontSx = fCurX - 0.5f;
+				fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
 				fFontSy = fCurY - 0.5f;
 				fFontEx = fFontSx + fFontWidth;
 				fFontEy = fFontSy + fFontHeight;
@@ -717,7 +715,7 @@ void CGraphicTextInstance::Render(RECT * pClipRect)
 				}
 			}
 
-			fFontSx = fCurX-0.5f;
+			fFontSx = fCurX + pCurCharInfo->bearingX - 0.5f;
 			fFontSy = fCurY-0.5f;
 			fFontEx = fFontSx + fFontWidth;
 			fFontEy = fFontSy + fFontHeight;

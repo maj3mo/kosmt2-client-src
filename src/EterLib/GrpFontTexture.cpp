@@ -10,6 +10,20 @@
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
 
+#include <cmath>
+
+// Precomputed gamma LUT to sharpen FreeType's grayscale anti-aliasing.
+// GDI ClearType has high-contrast edges; FreeType grayscale is softer.
+// Gamma < 1.0 boosts mid-range alpha, making edges crisper.
+static struct SAlphaGammaLUT {
+	unsigned char table[256];
+	SAlphaGammaLUT() {
+		table[0] = 0;
+		for (int i = 1; i < 256; ++i)
+			table[i] = (unsigned char)(pow(i / 255.0, 0.80) * 255.0 + 0.5);
+	}
+} s_alphaGammaLUT;
+
 CGraphicFontTexture::CGraphicFontTexture()
 {
 	Initialize();
@@ -53,19 +67,55 @@ void CGraphicFontTexture::Destroy()
 	stl_wipe(m_pFontTextureVector);
 	m_charInfoMap.clear();
 
-	// FT_Face is owned by CFontManager, do NOT free it here
-	m_ftFace = nullptr;
+	if (m_ftFace)
+	{
+		FT_Done_Face(m_ftFace);
+		m_ftFace = nullptr;
+	}
 
 	Initialize();
 }
 
 bool CGraphicFontTexture::CreateDeviceObjects()
 {
+	if (!m_ftFace)
+		return true;
+
+	// After device reset: wipe GPU textures, clear atlas state, and
+	// re-render all previously cached characters on demand.
+	// We keep m_charInfoMap keys but clear the entries so glyphs get re-rasterized.
+	std::vector<TCharacterKey> cachedKeys;
+	cachedKeys.reserve(m_charInfoMap.size());
+	for (const auto& pair : m_charInfoMap)
+		cachedKeys.push_back(pair.first);
+
+	stl_wipe(m_pFontTextureVector);
+	m_charInfoMap.clear();
+	m_x = 0;
+	m_y = 0;
+	m_step = 0;
+	m_isDirty = false;
+
+	// Reset CPU atlas buffer
+	if (m_pAtlasBuffer)
+		memset(m_pAtlasBuffer, 0, m_atlasWidth * m_atlasHeight * sizeof(DWORD));
+
+	// Create first GPU texture page
+	if (!AppendTexture())
+		return false;
+
+	// Re-rasterize all previously cached glyphs
+	for (TCharacterKey key : cachedKeys)
+		UpdateCharacterInfomation(key);
+
+	UpdateTexture();
 	return true;
 }
 
 void CGraphicFontTexture::DestroyDeviceObjects()
 {
+	m_lpd3dTexture = NULL;
+	stl_wipe(m_pFontTextureVector);
 }
 
 bool CGraphicFontTexture::Create(const char* c_szFontName, int fontSize, bool bItalic)
@@ -97,18 +147,16 @@ bool CGraphicFontTexture::Create(const char* c_szFontName, int fontSize, bool bI
 	m_pAtlasBuffer = new DWORD[width * height];
 	memset(m_pAtlasBuffer, 0, width * height * sizeof(DWORD));
 
-	// Get FT_Face from FontManager
-	m_ftFace = CFontManager::Instance().GetFace(c_szFontName);
+	// Store UTF-8 name for device reset re-creation
+	m_fontNameUTF8 = c_szFontName ? c_szFontName : "";
+
+	// Create a per-instance FT_Face (this instance owns it)
+	m_ftFace = CFontManager::Instance().CreateFace(c_szFontName);
 	if (!m_ftFace)
 	{
-		TraceError("CGraphicFontTexture::Create - Failed to get face for '%s'", c_szFontName ? c_szFontName : "(null)");
+		TraceError("CGraphicFontTexture::Create - Failed to create face for '%s'", c_szFontName ? c_szFontName : "(null)");
 		return false;
 	}
-
-	Tracef(" FontTexture: loaded '%s' size=%d family='%s' style='%s'\n",
-		c_szFontName ? c_szFontName : "(null)", fontSize,
-		m_ftFace->family_name ? m_ftFace->family_name : "?",
-		m_ftFace->style_name ? m_ftFace->style_name : "?");
 
 	// Set pixel size
 	int pixelSize = (fontSize < 0) ? -fontSize : fontSize;
@@ -207,26 +255,6 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 	if (!m_ftFace)
 		return NULL;
 
-	// Re-apply face state (FT_Face is shared across instances via CFontManager)
-	int pixelSize = (m_fontSize < 0) ? -m_fontSize : m_fontSize;
-	if (pixelSize == 0)
-		pixelSize = 12;
-	FT_Set_Pixel_Sizes(m_ftFace, 0, pixelSize);
-
-	if (m_bItalic)
-	{
-		FT_Matrix matrix;
-		matrix.xx = 0x10000L;
-		matrix.xy = 0x5800L;
-		matrix.yx = 0;
-		matrix.yy = 0x10000L;
-		FT_Set_Transform(m_ftFace, &matrix, NULL);
-	}
-	else
-	{
-		FT_Set_Transform(m_ftFace, NULL, NULL);
-	}
-
 	if (keyValue == 0x08)
 		keyValue = L' ';
 
@@ -248,8 +276,9 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 
 	int glyphBitmapWidth = bitmap.width;
 	int glyphBitmapHeight = bitmap.rows;
+	int bearingX = slot->bitmap_left;
 	int bearingY = slot->bitmap_top;
-	float advance = (float)(slot->advance.x >> 6);
+	float advance = ceilf((float)(slot->advance.x) / 64.0f);
 
 	// Normalize glyph placement to common baseline
 	// yOffset = distance from atlas row top to where the glyph bitmap starts
@@ -273,6 +302,7 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 		rNewCharInfo.right = 0;
 		rNewCharInfo.bottom = 0;
 		rNewCharInfo.advance = advance;
+		rNewCharInfo.bearingX = 0.0f;
 		return &rNewCharInfo;
 	}
 
@@ -319,7 +349,10 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 		{
 			unsigned char alpha = srcRow[col];
 			if (alpha)
-				dstRow[col] = ((DWORD)alpha << 24) | 0x00FFFFFF;  // White + alpha
+			{
+				alpha = s_alphaGammaLUT.table[alpha];
+				dstRow[col] = ((DWORD)alpha << 24) | 0x00FFFFFF;
+			}
 		}
 	}
 
@@ -336,6 +369,7 @@ CGraphicFontTexture::TCharacterInfomation* CGraphicFontTexture::UpdateCharacterI
 	rNewCharInfo.right = float(m_x + cellWidth) * rhwidth;
 	rNewCharInfo.bottom = float(m_y + cellHeight) * rhheight;
 	rNewCharInfo.advance = advance;
+	rNewCharInfo.bearingX = (float)bearingX;
 
 	m_x += cellWidth;
 

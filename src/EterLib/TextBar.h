@@ -17,7 +17,6 @@ class CTextBar : public CDibBar
 
 	protected:
 		void __SetFont(int fontSize, bool isBold);
-		void __ApplyFaceState();
 
 		void OnCreate();
 

@@ -73,12 +73,7 @@ bool CFontManager::Initialize()
 
 void CFontManager::Destroy()
 {
-	for (auto& pair : m_faceCache)
-	{
-		if (pair.second)
-			FT_Done_Face(pair.second);
-	}
-	m_faceCache.clear();
+	m_resolvedPathCache.clear();
 	m_fontPathMap.clear();
 
 	if (m_ftLibrary)
@@ -142,7 +137,7 @@ std::string CFontManager::ResolveFontPath(const char* faceName)
 	return "";
 }
 
-FT_Face CFontManager::GetFace(const char* faceName)
+FT_Face CFontManager::CreateFace(const char* faceName)
 {
 	if (!m_bInitialized)
 	{
@@ -150,24 +145,34 @@ FT_Face CFontManager::GetFace(const char* faceName)
 			return nullptr;
 	}
 
-	std::string path = ResolveFontPath(faceName);
-	if (path.empty())
+	if (!faceName || !faceName[0])
 		return nullptr;
 
-	// Check cache
-	auto it = m_faceCache.find(path);
-	if (it != m_faceCache.end())
-		return it->second;
+	std::string lowerName = ToLower(faceName);
 
-	// Load new face
+	// Check resolved path cache (avoids repeated disk stat calls)
+	std::string path;
+	auto cacheIt = m_resolvedPathCache.find(lowerName);
+	if (cacheIt != m_resolvedPathCache.end())
+	{
+		path = cacheIt->second;
+	}
+	else
+	{
+		path = ResolveFontPath(faceName);
+		if (path.empty())
+			return nullptr;
+		m_resolvedPathCache[lowerName] = path;
+	}
+
+	// Create a new FT_Face — caller owns it
 	FT_Face face = nullptr;
 	FT_Error err = FT_New_Face(m_ftLibrary, path.c_str(), 0, &face);
 	if (err != 0 || !face)
 	{
-		TraceError("CFontManager::GetFace - FT_New_Face failed for '%s' (error %d)", path.c_str(), err);
+		TraceError("CFontManager::CreateFace - FT_New_Face failed for '%s' (error %d)", path.c_str(), err);
 		return nullptr;
 	}
 
-	m_faceCache[path] = face;
 	return face;
 }

@@ -6,6 +6,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include <string>
 #include <vector>
 #include <map>
 
@@ -24,6 +25,7 @@ class CGraphicFontTexture : public CGraphicTexture
 			float right;
 			float bottom;
 			float advance;
+			float bearingX;
 		} TCharacterInfomation;
 
 		typedef std::vector<TCharacterInfomation*> TPCharacterInfomationVector;
@@ -75,6 +77,7 @@ class CGraphicFontTexture : public CGraphicTexture
 		bool m_isDirty;
 
 		TCHAR m_fontName[LF_FACESIZE];
+		std::string m_fontNameUTF8;  // stored for device reset re-creation
 		LONG m_fontSize;
 		bool m_bItalic;
 
