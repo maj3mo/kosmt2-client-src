@@ -69,7 +69,6 @@ void CGrannyMesh::DeformPNTVertices(void* dstBaseVertices, D3DXMATRIX* boneMatri
 			boneIndices,
 			(granny_matrix_4x4 const*)boneMatrices,
 			sizeof(granny_pwnt3432_vertex),
-			sizeof(granny_pwnt3432_vertex),
 			sizeof(granny_pnt332_vertex)
 		);
 	}
