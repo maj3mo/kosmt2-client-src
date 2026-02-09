@@ -10,7 +10,7 @@
 #include "Utils.h"
 #include "filedir.h"
 
-char korean_tolower(const char c);
+char ascii_tolower(const char c);
 
 const char* CreateTempFileName(const char* c_pszPrefix)
 {
@@ -293,7 +293,7 @@ void StringLowers(char * String)
 {
 	for (DWORD i = 0; i < strlen(String); ++i)
 	{
-		String[i] = korean_tolower(String[i]);
+		String[i] = ascii_tolower(String[i]);
 	}
 }
 
@@ -304,7 +304,7 @@ void StringPath(std::string & rString)
 		if (rString[i] == '\\')
 			rString[i] = '/';
 		else
-			rString[i] = korean_tolower(rString[i]);
+			rString[i] = ascii_tolower(rString[i]);
 	}
 }
 
@@ -315,7 +315,7 @@ void StringPath(char * pString)
 		if (pString[i] == '\\')
 			pString[i] = '/';
 		else
-			pString[i] = korean_tolower(pString[i]);
+			pString[i] = ascii_tolower(pString[i]);
 	}
 }
 
@@ -326,7 +326,7 @@ void StringPath(const char * c_szSrc, char * szDest)
 		if (c_szSrc[i] == '\\')
 			szDest[i] = '/';
 		else
-			szDest[i] = korean_tolower(c_szSrc[i]);
+			szDest[i] = ascii_tolower(c_szSrc[i]);
 	}
 }
 
@@ -340,7 +340,7 @@ void StringPath(const char * c_szSrc, std::string & rString)
 		if (c_szSrc[i] == '\\')
 			rString[i] = '/';
 		else
-			rString[i] = korean_tolower(c_szSrc[i]);
+			rString[i] = ascii_tolower(c_szSrc[i]);
 	}
 }
 

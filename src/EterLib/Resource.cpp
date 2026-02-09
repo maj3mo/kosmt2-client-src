@@ -120,7 +120,7 @@ int CResource::ConvertPathName(const char * c_szPathName, char * pszRetPathName,
 		if (*pc == '/')
 			*(pszRetPathName++) = '\\';
 		else
-			*(pszRetPathName++) = (char) korean_tolower(*pc);
+			*(pszRetPathName++) = (char) ascii_tolower(*pc);
 	}
 
 	*pszRetPathName = '\0';
