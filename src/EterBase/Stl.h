@@ -24,7 +24,7 @@
 
 #pragma warning ( pop )
 
-extern char korean_tolower(const char c);
+extern char ascii_tolower(const char c);
 extern std::string& stl_static_string(const char* c_sz);
 extern void stl_lowers(std::string& rstRet);
 extern int split_string(const std::string & input, const std::string & delimiter, std::vector<std::string>& results, bool includeEmpties);
