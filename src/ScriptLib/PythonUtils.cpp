@@ -19,20 +19,19 @@ PyObject * Py_BadArgument()
 PyObject * Py_BuildException(const char * c_pszErr, ...)
 {
 	if (!c_pszErr)
-		PyErr_Clear();
-	else
 	{
-		char szErrBuf[512+1];
-		va_list args;
-		va_start(args, c_pszErr);
-		vsnprintf(szErrBuf, sizeof(szErrBuf), c_pszErr, args);
-		va_end(args);
-
-		PyErr_SetString(PyExc_RuntimeError, szErrBuf);
+		PyErr_Clear();
+		return Py_BuildNone();
 	}
 
-	return Py_BuildNone();
-	//return NULL;
+	char szErrBuf[512+1];
+	va_list args;
+	va_start(args, c_pszErr);
+	vsnprintf(szErrBuf, sizeof(szErrBuf), c_pszErr, args);
+	va_end(args);
+
+	PyErr_SetString(PyExc_RuntimeError, szErrBuf);
+	return NULL;
 }
 
 PyObject * Py_BuildNone()

@@ -392,6 +392,7 @@ namespace MessengerSub {
         ADD_BY_VID,
         ADD_BY_NAME,
         REMOVE,
+        INVITE_ANSWER,  // Added to match server packet_headers.h
     }; }
     namespace GC { enum : uint8_t {
         LIST,
@@ -917,7 +918,7 @@ typedef struct command_safebox_money
     uint16_t	header;
     uint16_t	length;
     uint8_t        bState;
-    uint32_t       dwMoney;
+    int32_t        lMoney;  // Changed from uint32_t to int32_t to match server packet_structs.h
 } TPacketCGSafeboxMoney;
 
 typedef struct command_safebox_checkout
