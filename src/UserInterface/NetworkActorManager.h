@@ -89,6 +89,9 @@ struct SNetworkUpdateActorData
 	DWORD m_dwAtkSpd;
 	short m_sAlignment;
 	BYTE m_byPKMode;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	DWORD m_dwLevel;
+#endif
 	DWORD m_dwMountVnum;
 	DWORD m_dwStateFlags; // 본래 Create 때만 쓰이는 변수임
 	CAffectFlagContainer m_kAffectFlags;
@@ -100,6 +103,9 @@ struct SNetworkUpdateActorData
 		m_dwArmor=0;
 		m_dwWeapon=0;
 		m_dwHair=0;
+#ifdef ENABLE_SUPPORT_SYSTEM
+		m_dwLevel=0;
+#endif
 		m_dwMovSpd=0;
 		m_dwAtkSpd=0;
 		m_sAlignment=0;

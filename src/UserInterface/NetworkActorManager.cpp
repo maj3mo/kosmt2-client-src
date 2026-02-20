@@ -480,7 +480,9 @@ void CNetworkActorManager::UpdateActor(const SNetworkUpdateActorData& c_rkNetUpd
 		pkInstFind->SetAlignment(c_rkNetUpdateActorData.m_sAlignment);
 		pkInstFind->SetPKMode(c_rkNetUpdateActorData.m_byPKMode);
 		pkInstFind->SetStateFlags(c_rkNetUpdateActorData.m_dwStateFlags);
-
+#ifdef ENABLE_SUPPORT_SYSTEM
+		pkInstFind->SetLevelText(c_rkNetUpdateActorData.m_dwLevel);
+#endif
 		//if( c_rkNetUpdateActorData.m_dwMountVnum != 0 )
 		//{
 		//	pkInstFind->MountHorse(c_rkNetUpdateActorData.m_dwMountVnum);
@@ -500,6 +502,9 @@ void CNetworkActorManager::UpdateActor(const SNetworkUpdateActorData& c_rkNetUpd
 	rkNetActorData.m_dwMovSpd=c_rkNetUpdateActorData.m_dwMovSpd;
 	rkNetActorData.m_dwAtkSpd=c_rkNetUpdateActorData.m_dwAtkSpd;
 	rkNetActorData.m_dwArmor=c_rkNetUpdateActorData.m_dwArmor;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	rkNetActorData.m_dwLevel=c_rkNetUpdateActorData.m_dwLevel;
+#endif
 	rkNetActorData.m_dwWeapon=c_rkNetUpdateActorData.m_dwWeapon;
 	rkNetActorData.m_dwHair=c_rkNetUpdateActorData.m_dwHair;
 	rkNetActorData.m_sAlignment=c_rkNetUpdateActorData.m_sAlignment;

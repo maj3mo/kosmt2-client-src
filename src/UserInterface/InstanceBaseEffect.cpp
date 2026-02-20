@@ -41,7 +41,7 @@ void  CInstanceBase::SetEmpireNameMode(bool isEnable)
 
 		for (UINT uEmpire=1; uEmpire<EMPIRE_NUM; ++uEmpire)
 			g_akD3DXClrName[NAMECOLOR_PC+uEmpire]=g_akD3DXClrName[NAMECOLOR_EMPIRE_PC+uEmpire];
-		
+
 	}
 	else
 	{
@@ -166,7 +166,7 @@ void CInstanceBase::ProcessDamage()
 			rdwCRCEft = EFFECT_DAMAGE_TARGET;
 		}
 	}
-	
+
 	TraceError("ProcessDamage: Creating effect strDamageType=%s rdwCRCEft=%u effectCRC=%u",
 		strDamageType.c_str(), rdwCRCEft, ms_adwCRCAffectEffect[rdwCRCEft]);
 
@@ -211,12 +211,12 @@ void CInstanceBase::ProcessDamage()
 
 		DWORD effectResult = rkEftMgr.CreateEffect(ms_adwCRCAffectEffect[rdwCRCEft], D3DXVECTOR3(matrix._41, matrix._42, matrix._43)
 			,v3Rot);
-		TraceError("ProcessDamage: CreateEffect returned %u", effectResult);	
-		
+		TraceError("ProcessDamage: CreateEffect returned %u", effectResult);
+
 		textures.clear();
 
 		index++;
-	}	
+	}
 }
 
 void CInstanceBase::AttachSpecialEffect(DWORD effect)
@@ -259,7 +259,7 @@ void CInstanceBase::__EffectContainer_Destroy()
 void CInstanceBase::__EffectContainer_Initialize()
 {
 	SEffectContainer::Dict& rkDctEftID=__EffectContainer_GetDict();
-	rkDctEftID.clear();	
+	rkDctEftID.clear();
 }
 
 CInstanceBase::SEffectContainer::Dict& CInstanceBase::__EffectContainer_GetDict()
@@ -296,8 +296,8 @@ void CInstanceBase::__EffectContainer_DetachEffect(DWORD dwEftKey)
 void CInstanceBase::__AttachEmpireEffect(DWORD eEmpire)
 {
 	if (!__IsExistMainInstance())
-		return;	
-	
+		return;
+
 	CInstanceBase* pkInstMain=__GetMainInstancePtr();
 
 	if (IsWarp())
@@ -520,7 +520,7 @@ bool CInstanceBase::IsPVPInstance(CInstanceBase& rkInstSel)
 	DWORD dwGuildIDDst=rkInstSel.GetGuildID();
 
 	if (GetDuelMode())	//대련 모드일때는 ~_~
-		return true;	
+		return true;
 
 	return __FindPVPKey(dwVIDSrc, dwVIDDst) || __FindGVGKey(dwGuildIDSrc, dwGuildIDDst);
 											//__FindDUELKey(dwVIDSrc, dwVIDDst);
@@ -541,7 +541,7 @@ UINT CInstanceBase::GetNameColorIndex()
 		}
 
 		if (__IsExistMainInstance() && !__IsMainInstance())
-		{			
+		{
 			CInstanceBase* pkInstMain=__GetMainInstancePtr();
 			if (!pkInstMain)
 			{
@@ -596,7 +596,7 @@ UINT CInstanceBase::GetNameColorIndex()
 			return NAMECOLOR_PARTY;
 
 		return NAMECOLOR_PC + GetEmpireID();
-		
+
 	}
 	else if (IsNPC())
 	{
@@ -649,6 +649,11 @@ void CInstanceBase::AttachTextTail()
 	{
 		UpdateTextTailLevel(m_dwLevel);
 	}
+
+	if (m_isSupport)
+	{
+		UpdateSupportTextTail();
+	}
 }
 
 void CInstanceBase::DetachTextTail()
@@ -671,23 +676,36 @@ void CInstanceBase::UpdateTextTailLevel(DWORD level)
 	sprintf(szText, "Lv %d", level);
 	CPythonTextTail::Instance().AttachLevel(GetVirtualID(), szText, s_kLevelColor);
 }
+void CInstanceBase::UpdateSupportTextTail()
+{
+	//static D3DXCOLOR s_kLevelColor = D3DXCOLOR(119.0f/255.0f, 246.0f/255.0f, 168.0f/255.0f, 1.0f);
+	static D3DXCOLOR s_kLevelColor = D3DXCOLOR(204.0f/255.0f, 102.0f/255.0f, 0.0f/255.0f, 1.0f);
+
+
+	char szText[256] = "BUFF";
+
+	CPythonTextTail::Instance().AttachTitle(GetVirtualID(), szText, s_kLevelColor);
+}
 
 void CInstanceBase::RefreshTextTail()
 {
 	CPythonTextTail::Instance().SetCharacterTextTailColor(GetVirtualID(), GetNameColor());
 
-	int iAlignmentGrade = GetAlignmentGrade();
-	if (TITLE_NONE == iAlignmentGrade)
+	if (!m_isSupport)
 	{
-		CPythonTextTail::Instance().DetachTitle(GetVirtualID());
-	}
-	else
-	{
-		std::map<int, std::string>::iterator itor = g_TitleNameMap.find(iAlignmentGrade);
-		if (g_TitleNameMap.end() != itor)
+		int iAlignmentGrade = GetAlignmentGrade();
+		if (TITLE_NONE == iAlignmentGrade)
 		{
-			const std::string & c_rstrTitleName = itor->second;
-			CPythonTextTail::Instance().AttachTitle(GetVirtualID(), c_rstrTitleName.c_str(), GetTitleColor());
+			CPythonTextTail::Instance().DetachTitle(GetVirtualID());
+		}
+		else
+		{
+			std::map<int, std::string>::iterator itor = g_TitleNameMap.find(iAlignmentGrade);
+			if (g_TitleNameMap.end() != itor)
+			{
+				const std::string & c_rstrTitleName = itor->second;
+				CPythonTextTail::Instance().AttachTitle(GetVirtualID(), c_rstrTitleName.c_str(), GetTitleColor());
+			}
 		}
 	}
 }
@@ -769,7 +787,7 @@ void CInstanceBase::SetAffectFlagContainer(const CAffectFlagContainer& c_rkAffec
 {
 	if (IsBuilding())
 	{
-		return;		
+		return;
 	}
 	else if (IsStone())
 	{
@@ -996,8 +1014,8 @@ void CInstanceBase::SetEmoticon(UINT eEmoticon)
 
 		//CEffectManager& rkEftMgr=CEffectManager::Instance();
 		CCamera * pCamera = CCameraManager::Instance().GetCurrentCamera();
-		
-		D3DXVECTOR3 v3Dir = (pCamera->GetEye()-v3Pos)*9/10;	
+
+		D3DXVECTOR3 v3Dir = (pCamera->GetEye()-v3Pos)*9/10;
 		v3Pos = pCamera->GetEye()-v3Dir;
 
 		v3Pos = D3DXVECTOR3(0,0,0);
@@ -1032,7 +1050,7 @@ DWORD CInstanceBase::__AttachEffect(UINT eEftType)
 	if (ms_astAffectEffectAttachBone[eEftType].empty())
 	{
 		DWORD dwEftID = m_GraphicThingInstance.AttachEffectByID(0, NULL, ms_adwCRCAffectEffect[eEftType]);
-		
+
 		// MR-7: Recover affect visual effects when coming out of invisibility
 		if (dwEftID && IsAffect(AFFECT_INVISIBILITY))
 		{
@@ -1075,7 +1093,7 @@ DWORD CInstanceBase::__AttachEffect(UINT eEftType)
 			{
 				// MR-7: Recover affect visual effects when coming out of invisibility
 				DWORD dwEftID = m_GraphicThingInstance.AttachEffectByID(0, c_szBoneName, ms_adwCRCAffectEffect[eEftType]);
-				
+
 				if (dwEftID && IsAffect(AFFECT_INVISIBILITY))
 				{
 					CEffectManager::Instance().SelectEffectInstance(dwEftID);
@@ -1175,5 +1193,5 @@ bool CInstanceBase::RegisterTitleColor(UINT uIndex, UINT r, UINT g, UINT b)
 		return false;
 
 	g_akD3DXClrTitle[uIndex]=__RGBToD3DXColoru(r, g, b);
-	return true;	
+	return true;
 }

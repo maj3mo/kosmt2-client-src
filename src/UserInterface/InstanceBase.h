@@ -457,6 +457,7 @@ class CInstanceBase
 		void					AttachTextTail();
 		void					DetachTextTail();
 		void					UpdateTextTailLevel(DWORD level);
+		void UpdateSupportTextTail();
 
 		void					RefreshTextTail();
 		void					RefreshTextTailTitle();
@@ -484,11 +485,15 @@ class CInstanceBase
 
 		void					SetNameString(const char* c_szName, int len);
 		bool					SetRace(DWORD dwRaceIndex);
+		bool SetIsSupport(bool isSupport);
 		void					SetVirtualID(DWORD wVirtualNumber);
 		void					SetVirtualNumber(DWORD dwVirtualNumber);
 		void					SetInstanceType(int iInstanceType);
 		void					SetAlignment(short sAlignment);
 		void					SetPKMode(BYTE byPKMode);
+#ifdef ENABLE_SUPPORT_SYSTEM
+	void					SetLevelText(int slevel);
+#endif
 		void					SetKiller(bool bFlag);
 		void					SetPartyMemberFlag(bool bFlag);
 		void					SetStateFlags(DWORD dwStateFlags);
@@ -583,6 +588,7 @@ class CInstanceBase
 		BOOL					IsResource();
 		BOOL					IsNPC();
 		BOOL					IsPC();
+		BOOL IsSupport();
 		BOOL					IsPoly();
 		BOOL					IsWarp();
 		BOOL					IsGoto();
@@ -958,6 +964,10 @@ class CInstanceBase
 		BYTE					m_eRaceType;
 		DWORD					m_eShape;
 		DWORD					m_dwRace;
+#ifdef ENABLE_SUPPORT_SYSTEM
+		bool					m_isSupport = false;
+#endif
+
 		DWORD					m_dwVirtualNumber;
 		short					m_sAlignment;
 		BYTE					m_byPKMode;

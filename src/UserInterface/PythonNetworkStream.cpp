@@ -785,6 +785,9 @@ void CPythonNetworkStream::RegisterGameHandlers()
 	h[GC::CHARACTER_UPDATE2]      = { &CPythonNetworkStream::RecvCharacterUpdatePacketNew, sizeof(TPacketGCCharacterUpdate2),           false };
 	h[GC::CHARACTER_DEL]          = { &CPythonNetworkStream::RecvCharacterDeletePacket,    sizeof(TPacketGCCharacterDelete),            false };
 	h[GC::CHAT]                   = { &CPythonNetworkStream::RecvChatPacket,               sizeof(TPacketGCChat),                       false };
+#ifdef ENABLE_SUPPORT_SYSTEM
+	h[GC::SUPPORT_SKILL]                   = { &CPythonNetworkStream::RecvSupportUseSkill,               sizeof(TPacketGCSupportUseSkill),                       false };
+#endif
 	h[GC::SYNC_POSITION]          = { &CPythonNetworkStream::RecvSyncPositionPacket,       sizeof(TPacketGCC2C),                        false };
 	h[GC::OWNERSHIP]              = { &CPythonNetworkStream::RecvOwnerShipPacket,          sizeof(TPacketGCOwnership),                  false };
 	h[GC::WHISPER]                = { &CPythonNetworkStream::RecvWhisperPacket,            sizeof(TPacketGCWhisper),                    false };

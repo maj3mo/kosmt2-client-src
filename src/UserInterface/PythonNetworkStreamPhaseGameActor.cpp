@@ -125,8 +125,10 @@ bool CPythonNetworkStream::RecvCharacterAppendPacket()
 
 	kNetActorData.m_dwLevel = 0; // 몬스터 레벨 표시 안함
 
-	if(kNetActorData.m_bType != CActorInstance::TYPE_PC && 
-		kNetActorData.m_bType != CActorInstance::TYPE_NPC)
+	if(kNetActorData.m_bType != CActorInstance::TYPE_PC &&
+		kNetActorData.m_bType != CActorInstance::TYPE_NPC &&
+		kNetActorData.m_bType != CActorInstance::TYPE_SUPPORT
+		)
 	{
 		const char * c_szName;
 		CPythonNonPlayer& rkNonPlayer=CPythonNonPlayer::Instance();
@@ -158,7 +160,11 @@ bool CPythonNetworkStream::RecvCharacterAdditionalInfo()
 
 	if(kNetActorData.m_dwVID == chrInfoPacket.dwVID)
 	{
-		if (kNetActorData.m_bType == CActorInstance::TYPE_NPC)
+		if (kNetActorData.m_dwRace == 34001)
+		{
+			kNetActorData.m_stName = chrInfoPacket.name;
+		}
+		else if (kNetActorData.m_bType == CActorInstance::TYPE_NPC)
 		{
 			const char* c_szName;
 			if (CPythonNonPlayer::Instance().GetName(kNetActorData.m_dwRace, &c_szName))
@@ -247,6 +253,9 @@ bool CPythonNetworkStream::RecvCharacterUpdatePacket()
 	kNetUpdateActorData.m_byPKMode=chrUpdatePacket.bPKMode;
 	kNetUpdateActorData.m_dwStateFlags=chrUpdatePacket.bStateFlag;
 	kNetUpdateActorData.m_dwMountVnum=chrUpdatePacket.dwMountVnum;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	kNetUpdateActorData.m_dwLevel=chrUpdatePacket.dwLevel;
+#endif
 	__RecvCharacterUpdatePacket(&kNetUpdateActorData);
 
 	return true;
@@ -272,6 +281,9 @@ bool CPythonNetworkStream::RecvCharacterUpdatePacketNew()
 	kNetUpdateActorData.m_byPKMode=chrUpdatePacket.bPKMode;
 	kNetUpdateActorData.m_dwStateFlags=chrUpdatePacket.bStateFlag;
 	kNetUpdateActorData.m_dwMountVnum=chrUpdatePacket.dwMountVnum;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	kNetUpdateActorData.m_dwLevel=chrUpdatePacket.dwLevel;
+#endif
 	__RecvCharacterUpdatePacket(&kNetUpdateActorData);
 
 	return true;
@@ -367,6 +379,41 @@ bool CPythonNetworkStream::RecvCharacterDeletePacket()
 	return true;
 }
 
+#ifdef ENABLE_SUPPORT_SYSTEM
+bool CPythonNetworkStream::RecvSupportUseSkill()
+{
+	TPacketGCSupportUseSkill packet;
+	//TraceError("Skill0");
+	if (!Recv(sizeof(TPacketGCSupportUseSkill), &packet))
+	{
+		Tracen("CPythonNetworkStream::RecvCharacterMovePacket - PACKET READ ERROR");
+		return false;
+	}
+	CInstanceBase* pkInstClone = CPythonCharacterManager::Instance().GetInstancePtr(packet.dwVid);
+	DWORD dwSkillIndex = packet.dwVnum;
+	CPythonSkill::TSkillData * pSkillData;
+	if (!CPythonSkill::Instance().GetSkillData(dwSkillIndex, &pSkillData))
+		return false;
+	//TraceError("Skill1");
+	DWORD value;
+	if(packet.dwLevel <=17)
+		value = 0;
+	else if(packet.dwLevel <=30 && packet.dwLevel >17)
+		value = 1;
+	else if(packet.dwLevel > 30 && packet.dwLevel <= 39)
+		value = 2;
+	else if(packet.dwLevel >= 40)
+		value = 3;
+
+	DWORD dwMotionIndex = pSkillData->GetSkillMotionIndex(value);
+	if (!pkInstClone->NEW_UseSkill(dwSkillIndex, dwMotionIndex, 1, false))
+	{
+		Tracenf("CPythonPlayer::UseGuildSkill(%d) - pkInstMain->NEW_UseSkill - ERROR", dwSkillIndex);
+	}
+
+	return true;
+}
+#endif
 
 bool CPythonNetworkStream::RecvCharacterMovePacket()
 {

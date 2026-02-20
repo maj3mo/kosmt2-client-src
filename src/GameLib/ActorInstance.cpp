@@ -25,9 +25,9 @@ void CActorInstance::INSTANCEBASE_Transform()
 		m_x = m_pkHorse->NEW_GetCurPixelPositionRef().x;
 		m_y = -m_pkHorse->NEW_GetCurPixelPositionRef().y;
 		m_z = m_pkHorse->NEW_GetCurPixelPositionRef().z;
-		m_bNeedUpdateCollision = TRUE;			
+		m_bNeedUpdateCollision = TRUE;
 	}
-	
+
 	//DWORD t2=ELTimer_GetMSec();
 	Update();
 	//DWORD t3=ELTimer_GetMSec();
@@ -80,7 +80,7 @@ void CActorInstance::OnUpdate()
 
 		if (t4 - t1 > 3)
 		{
-			fprintf(fp, "AIU2.Total %d (Time %f)\n", 
+			fprintf(fp, "AIU2.Total %d (Time %f)\n",
 				t4-t1, ELTimer_GetMSec() / 1000.0f);
 			fprintf(fp, "AIU2.GU %d\n", t2 - t1);
 			fprintf(fp, "AIU2.UAI %d\n", t3 - t2);
@@ -254,7 +254,7 @@ bool CActorInstance::IsPoly()
 	if (TYPE_POLY==m_eActorType)
 		return true;
 
-	if (TYPE_PC==m_eActorType)
+	if (TYPE_PC==m_eActorType || TYPE_SUPPORT == m_eActorType)
 		if (m_eRace >= MAIN_RACE_MAX_NUM)
 			return TRUE;
 
@@ -263,7 +263,7 @@ bool CActorInstance::IsPoly()
 
 bool CActorInstance::IsPC()
 {
-	if (TYPE_PC==m_eActorType)
+	if (TYPE_PC==m_eActorType  || TYPE_SUPPORT == m_eActorType)
 		return true;
 
 	return false;
@@ -314,7 +314,7 @@ bool CActorInstance::IsBuilding()
 	if (TYPE_BUILDING==m_eActorType)
 		return true;
 
-	return false;	
+	return false;
 }
 
 bool CActorInstance::IsDoor()
@@ -594,7 +594,7 @@ void CActorInstance::AdjustDynamicCollisionMovement(const CActorInstance * c_pAc
 
 	if (isAttacking() )
 		return;
-	
+
 	UINT uActorType = c_pActorInstance->GetActorType();
 	if( (uActorType == TYPE_BUILDING) || (uActorType == TYPE_OBJECT) || (uActorType == TYPE_DOOR) || (uActorType == TYPE_STONE))
 	{
@@ -696,7 +696,7 @@ void CActorInstance::__AdjustCollisionMovement(const CGraphicObjectInstance * c_
 
 	// Body는 하나임을 가정합니다.
 
-	if (m_v3Movement.x == 0.0f && m_v3Movement.y == 0.0f && m_v3Movement.z == 0.0f) 
+	if (m_v3Movement.x == 0.0f && m_v3Movement.y == 0.0f && m_v3Movement.z == 0.0f)
 		return;
 
 	float move_length = D3DXVec3Length(&m_v3Movement);
@@ -746,7 +746,7 @@ BOOL CActorInstance::IsMovement()
 	if (m_pkHorse)
 		if (m_pkHorse->IsMovement())
 			return TRUE;
-		
+
 	if (0.0f != m_v3Movement.x)
 		return TRUE;
 	if (0.0f != m_v3Movement.y)
@@ -906,7 +906,7 @@ void CActorInstance::__InitializeStateData()
 	m_iRenderMode = RENDER_MODE_NORMAL;
 	m_fAlphaValue = 0.0f;
 	m_AddColor = D3DXCOLOR(0.0f, 0.0f, 0.0f, 1.0f);
-	
+
 	m_dwMtrlColor=0xffffffff;
 	m_dwMtrlAlpha=0xff000000;
 
@@ -915,7 +915,7 @@ void CActorInstance::__InitializeStateData()
 }
 
 void CActorInstance::__InitializeMotionData()
-{	
+{
 	m_wcurMotionMode = CRaceMotionData::MODE_GENERAL;
 	m_wcurComboType = 0;
 
@@ -976,7 +976,7 @@ void CActorInstance::__Initialize()
 
 	__BlendAlpha_Initialize();
 
-	ClearFlyTargeter();	
+	ClearFlyTargeter();
 }
 
 CActorInstance::CActorInstance()

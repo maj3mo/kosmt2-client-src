@@ -259,6 +259,9 @@ namespace GC
     constexpr uint16_t SPECIFIC_EFFECT    = 0x0A31;
     constexpr uint16_t MOUNT              = 0x0A40;
     constexpr uint16_t OWNERSHIP          = 0x0A41;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	constexpr uint16_t SUPPORT_SKILL     = 0x0A51;
+#endif
     constexpr uint16_t NPC_POSITION       = 0x0A50;
 
     // World
@@ -1222,6 +1225,17 @@ typedef struct command_player_create
 	uint8_t		DEX;
 } TPacketCGCreateCharacter;
 
+#ifdef ENABLE_SUPPORT_SYSTEM
+typedef struct support_use_skill
+{
+	uint16_t	header;
+	uint16_t	length;
+	DWORD	dwVnum;
+	DWORD	dwVid;
+	DWORD	dwLevel;
+}TPacketGCSupportUseSkill;
+#endif
+
 typedef struct command_player_create_success
 {
     uint16_t	header;
@@ -1371,6 +1385,9 @@ typedef struct packet_update_char
 
 	uint32_t		dwGuildID;
     int16_t       sAlignment;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	DWORD   dwLevel;
+#endif
 	uint8_t		bPKMode;
 	uint32_t		dwMountVnum;
 } TPacketGCCharacterUpdate;
@@ -1390,6 +1407,9 @@ typedef struct packet_update_char2
 
 	uint32_t		dwGuildID;
     int16_t       sAlignment;
+#ifdef ENABLE_SUPPORT_SYSTEM
+	DWORD   dwLevel;
+#endif
 	uint8_t		bPKMode;
 	uint32_t		dwMountVnum;
 } TPacketGCCharacterUpdate2;

@@ -86,6 +86,7 @@ class CActorInstance : public IActorInstance, public IFlyTargetableObject
 			TYPE_POLY,
 			TYPE_HORSE,
 			TYPE_GOTO,
+			TYPE_SUPPORT,
 
 			TYPE_OBJECT, // Only For Client
 		};

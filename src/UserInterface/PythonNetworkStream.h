@@ -450,7 +450,9 @@ class CPythonNetworkStream : public CNetworkStream, public CSingleton<CPythonNet
 		bool RecvItemGroundAddPacket();
 		bool RecvItemGroundDelPacket();
 		bool RecvItemOwnership();
-
+#ifdef ENABLE_SUPPORT_SYSTEM
+	bool RecvSupportUseSkill();
+#endif
 		bool RecvQuickSlotAddPacket();				// Alarm to python
 		bool RecvQuickSlotDelPacket();				// Alarm to python
 		bool RecvQuickSlotMovePacket();				// Alarm to python
