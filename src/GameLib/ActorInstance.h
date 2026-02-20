@@ -265,6 +265,7 @@ class CActorInstance : public IActorInstance, public IFlyTargetableObject
 		bool CanUseSkill();
 
 		bool IsPC();
+		bool IsSupport();
 		bool IsNPC();
 		bool IsEnemy();
 		bool IsStone();

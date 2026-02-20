@@ -3,6 +3,7 @@
 #include "PythonTextTail.h"
 #include "AbstractApplication.h"
 #include "AbstractPlayer.h"
+#include "PythonNonPlayer.h"
 #include "PythonPlayer.h"
 #include "PythonSystem.h"
 
@@ -650,7 +651,7 @@ void CInstanceBase::AttachTextTail()
 		UpdateTextTailLevel(m_dwLevel);
 	}
 
-	if (m_isSupport)
+	if (IsSupport())
 	{
 		UpdateSupportTextTail();
 	}
@@ -681,17 +682,16 @@ void CInstanceBase::UpdateSupportTextTail()
 	//static D3DXCOLOR s_kLevelColor = D3DXCOLOR(119.0f/255.0f, 246.0f/255.0f, 168.0f/255.0f, 1.0f);
 	static D3DXCOLOR s_kLevelColor = D3DXCOLOR(204.0f/255.0f, 102.0f/255.0f, 0.0f/255.0f, 1.0f);
 
-
-	char szText[256] = "BUFF";
-
-	CPythonTextTail::Instance().AttachTitle(GetVirtualID(), szText, s_kLevelColor);
+	const char* c_szName;
+	if (CPythonNonPlayer::Instance().GetName(34017, &c_szName))
+	CPythonTextTail::Instance().AttachTitle(GetVirtualID(), c_szName, s_kLevelColor);
 }
 
 void CInstanceBase::RefreshTextTail()
 {
 	CPythonTextTail::Instance().SetCharacterTextTailColor(GetVirtualID(), GetNameColor());
 
-	if (!m_isSupport)
+	if (!IsSupport())
 	{
 		int iAlignmentGrade = GetAlignmentGrade();
 		if (TITLE_NONE == iAlignmentGrade)

@@ -725,13 +725,10 @@ bool CInstanceBase::Create(const SCreateData& c_rkCreateData)
 		return false;
 
 #ifdef ENABLE_SUPPORT_SYSTEM
-
-	if(c_rkCreateData.m_dwRace == 34001)
+	if(c_rkCreateData.m_dwRace == 34017)
 	{
 		SetInstanceType(CActorInstance::TYPE_SUPPORT);
-		SetRace(6);
-
-
+		SetRace(7);
 	}
 #endif
 
@@ -2406,7 +2403,7 @@ BOOL CInstanceBase::IsPC()
 
 BOOL CInstanceBase::IsSupport()
 {
-	return m_isSupport;
+	return m_GraphicThingInstance.IsSupport();
 }
 
 BOOL CInstanceBase::IsNPC()

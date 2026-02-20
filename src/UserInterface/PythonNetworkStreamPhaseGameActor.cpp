@@ -160,7 +160,7 @@ bool CPythonNetworkStream::RecvCharacterAdditionalInfo()
 
 	if(kNetActorData.m_dwVID == chrInfoPacket.dwVID)
 	{
-		if (kNetActorData.m_dwRace == 34001)
+		if (kNetActorData.m_dwRace == 34017)
 		{
 			kNetActorData.m_stName = chrInfoPacket.name;
 		}

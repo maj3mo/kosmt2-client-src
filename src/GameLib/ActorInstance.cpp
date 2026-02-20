@@ -269,6 +269,14 @@ bool CActorInstance::IsPC()
 	return false;
 }
 
+bool CActorInstance::IsSupport()
+{
+	if (TYPE_SUPPORT == m_eActorType)
+		return true;
+
+	return false;
+}
+
 bool CActorInstance::IsNPC()
 {
 	if (TYPE_NPC==m_eActorType)
